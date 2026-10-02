@@ -15,6 +15,7 @@ import { DragRace, LANE, settle } from './drag.js';
 import { JobRunner } from './jobs.js';
 import { unlock, checkRace, checkDrag, checkGarage } from './achievements.js';
 import { ReplayRecorder, ReplayPlayer } from './replay.js';
+import { CarDamage, Debris } from './damage.js';
 
 const STEP = 1 / 240;
 const CAMERAS = ['cockpit', 'hood', 'chase', 'far'];
@@ -70,6 +71,8 @@ export class Game {
     this.paintHex = PAINT_COLORS[cfg.color] ?? base.color;
     this.model = new CarModel(spec, this.paintHex, { number: 1, cockpit: true, helmet: 0xffd200, glow: this._glowColor() });
     this.scene.add(this.model.root);
+    this.damage = new CarDamage(this.model, spec, S.damage || 'full');
+    this.car.dmg = this.damage.mods;
     if (this.model.cabinLight) this.model.cabinLight.intensity = this.night ? 0.5 : 0;
     if (this.night) {
       // Headlights.
@@ -81,6 +84,11 @@ export class Game {
 
     this.particles = new Particles(this.scene);
     this.skids = new SkidMarks(this.scene);
+    this.debris = new Debris(this.scene, (x, z) => track.heightAt(x, z), (x, z) => this._debrisBounds(x, z));
+    this.misfireT = 0;
+    this.retired = false;
+    this.retireAt = 0;
+    this.smokeT = 0;
     this.rainFx = this.rain ? new Rain(this.scene, S.graphics === 'low' ? 2500 : 5000, this.night) : null;
 
     // Grid: player at the back in a race, alone in time trial, right lane on the drag strip.
@@ -95,6 +103,7 @@ export class Game {
       const ai = new AIDriver(track, i, g.s, g.d, cfg.difficulty, { tier: base.tier, speed: this.mods.aiSpeed * (this.rain ? 0.9 : 1), rival: rivals[i] });
       const model = new CarModel(ai.spec, ai.color, { number: ai.number, helmet: [0xffffff, 0xff3b30, 0x34c759, 0x0a84ff][i % 4] });
       ai.model = model;
+      ai.damage = new CarDamage(model, ai.spec, (S.damage || 'full') === 'off' ? 'off' : 'visual');
       this.scene.add(model.root);
       this.ais.push(ai);
     }
@@ -319,6 +328,12 @@ export class Game {
       throttle = Math.min(throttle, 0.25);
     }
     const autoClutch = S.autoClutch || inp.source !== 'wheel' || !this.input.mapping?.clutch;
+    // A damaged engine misfires: the power cuts out in stutters with a bang.
+    if (this.damage.misfire > 0 && car.engineOn && throttle > 0.2 && this.misfireT <= 0 && Math.random() < this.damage.misfire * dt * 4) {
+      this.misfireT = 0.08 + Math.random() * 0.14;
+      this.audio.pop();
+    }
+    if (this.misfireT > 0) { this.misfireT -= dt; throttle *= 0.12; }
 
     const ev = car.updateTransmission(dt, {
       mode, hGear: inp.hGear ?? 0, shiftUp: inp.pressed.shiftUp, shiftDown: inp.pressed.shiftDown,
@@ -351,7 +366,8 @@ export class Game {
       this.acc -= STEP;
       n++;
     }
-    if (car.stalledEvent) {
+    this.damage.update(dt, car);
+    if (car.stalledEvent && !this.damage.dead) {
       car.stalledEvent = false;
       this.hud.message('STALLED', 1.6, 'warn');
       this.hud.sub('Press the clutch to restart', 2.5);
@@ -361,6 +377,7 @@ export class Game {
 
     this._collideWalls();
     if (!this.mods.ghost) this._collideCars(dt);
+    this._damageFx(dt);
     this._progress(dt);
     this._scoring(dt);
     if (this.drag) this._updateDrag(dt);
@@ -676,6 +693,117 @@ export class Game {
     return { mu: mu * this.wet, drag, slope, kerb, grass };
   }
 
+  // ---------------------------------------------------------------- damage
+  _debrisBounds(x, z) {
+    const t = this.track, p = t.project(x, z, -1, this._dbp || (this._dbp = {}));
+    const lim = t.wallDist - 0.3;
+    if (Math.abs(p.d) <= lim) return null;
+    const over = p.d - Math.sign(p.d) * lim;
+    return { hit: true, x: x - p.nx * over, z: z - p.nz * over };
+  }
+
+  _damageFx(dt) {
+    const car = this.car, dm = this.damage;
+    const sp = Math.sin(car.psi), cp = Math.cos(car.psi);
+    const vx = car.u * sp + car.v * cp, vz = car.u * cp - car.v * sp;
+    if (dm.events.length) this._damageEvents(dm, vx, vz, true);
+    for (const ai of this.ais) {
+      if (ai.damage?.events.length) this._damageEvents(ai.damage, ai.v * Math.sin(ai.psi), ai.v * Math.cos(ai.psi), false);
+    }
+    if (dm.mechanical) {
+      const st = this.model.style, zOff = (this.spec.a - this.spec.b) / 2;
+      const hot = dm.temp > 112, eng = dm.engine;
+      // Steam or smoke from the engine bay; flames once it's done for.
+      if (eng > 0.4 || hot) {
+        this.smokeT -= dt;
+        if (this.smokeT <= 0) {
+          this.smokeT = 0.08 / Math.max(0.3, eng + (hot ? 0.4 : 0));
+          const mid = this.spec.style === 'proto' || this.spec.style === 'hyper';
+          const lz = (mid ? -st.len / 2 + 1.0 : st.len / 2 - 0.9) + zOff;
+          const x = car.x + sp * lz, z = car.z + cp * lz, y = this.carY + st.hoodH + 0.05;
+          const c = dm.dead ? 0.16 : eng > 0.75 ? 0.35 : hot && eng < 0.5 ? 0.92 : 0.6;
+          const r = (k) => (Math.random() - 0.5) * k;
+          this.particles.emit(0, x + r(0.6), y, z + r(0.6), vx * 0.25 + r(1), 0.9 + Math.random(), vz * 0.25 + r(1), 1.1 + Math.random() * 0.8, 0.45 + eng * 0.35, c, c, c);
+          if (dm.dead && Math.random() < 0.7) {
+            this.particles.emit(0, x + r(0.4), y, z + r(0.4), vx * 0.2 + r(0.6), 1.6 + Math.random(), vz * 0.2 + r(0.6), 0.45, 0.45, 1.0, 0.45 + Math.random() * 0.25, 0.08);
+          }
+        }
+      }
+      // Bare rims on the road throw sparks.
+      if (car.speed > 4) {
+        for (let i = 0; i < 4; i++) {
+          if (!(dm.lost[i] || dm.tyre[i] < 0.05) || Math.random() > 0.6) continue;
+          const lz = i < 2 ? this.spec.a : -this.spec.b, lx = (i % 2 ? -1 : 1) * this.spec.track / 2;
+          this.particles.sparks(car.x + sp * lz + cp * lx, this.carY + 0.08, car.z + cp * lz - sp * lx, vx, vz, 2);
+        }
+      }
+    }
+    this.debris.update(dt, car, this.carY);
+    if (this.frame % 6 === 0) this.hud.setDamage(dm);
+    if (this.retireAt && this.time > this.retireAt && this.cfg.mode === 'race' && !this.playerFinished) this._retire();
+  }
+
+  _damageEvents(dm, vx, vz, player) {
+    for (const e of dm.events) {
+      if (e.type === 'detach') {
+        const out = 2 + e.sev * 0.22, r = () => (Math.random() - 0.5) * 2;
+        this.debris.add(e.part.obj, e.matrix, vx * 0.75 - e.nx * out + r(), 1.5 + Math.random() * 2 + e.sev * 0.08, vz * 0.75 - e.nz * out + r(), 5 + e.sev * 0.6);
+        this.audio.crunch(Math.min(1, 0.3 + e.sev / 18));
+        if (player && e.part.kind === 'wheel') this.hud.message('WHEEL OFF!', 2, 'warn');
+      } else if (e.type === 'glass') {
+        this.particles.glass(e.x, e.y, e.z, vx, vz, e.n);
+        this.audio.glass();
+      } else if (e.type === 'pop') {
+        this.audio.crunch(0.35);
+      }
+      if (!player) continue;
+      if (e.type === 'puncture') { this.hud.sub('PUNCTURE!', 2.5); this.audio.pop(); }
+      if (e.type === 'overheat') this.hud.sub('ENGINE OVERHEATING', 3);
+      if (e.type === 'engine') this.hud.sub('ENGINE DAMAGED', 2.5);
+      if (e.type === 'dead') {
+        this.hud.message('ENGINE DESTROYED', 3, 'warn');
+        if (this.cfg.mode === 'race' && !this.playerFinished) this.retireAt = this.time + 3;
+        else this.hud.sub('Pause → Repair car', 5);
+      }
+    }
+    dm.events.length = 0;
+  }
+
+  _retire() {
+    this.retireAt = 0;
+    this.retired = true;
+    this.playerFinished = true;
+    this.finishPosition = this.ais.length + 1;
+    this.finishTime = this.time - this.raceStartTime;
+    this.state = 'finished';
+    this.finishedAt = this.time - 2.5;
+    this.hud.message('RETIRED', 3, 'warn');
+  }
+
+  // Racing in career modes costs money when you bend the car.
+  _repairBill(reward) {
+    const dm = this.damage;
+    if (!dm.mechanical || dm.total < 0.03) return;
+    const price = Math.max(3000, this.base.price || 0);
+    const bill = Math.max(100, Math.round((dm.total * price * 0.12) / 50) * 50);
+    this.career.money = Math.max(0, this.career.money - bill);
+    saveCareer(this.career);
+    reward.lines.push(['Repairs', -bill]);
+    reward.total -= bill;
+  }
+
+  canRepair() {
+    return this.cfg.mode !== 'race' && this.cfg.mode !== 'drag';
+  }
+
+  repairCar() {
+    this.damage.repair();
+    this.car.engineOn = true;
+    this.car.omegaE = this.spec.idle / 9.549;
+    this.hud.setDamage(this.damage);
+    this.hud.sub('CAR REPAIRED', 1.5);
+  }
+
   _corners() {
     const car = this.car, s = this.model.style;
     const sp = Math.sin(car.psi), cp = Math.cos(car.psi);
@@ -711,6 +839,7 @@ export class Game {
           car.applyImpulse(tx * Jt, tz * Jt, x, z);
           worst = Math.max(worst, -vn);
           if (-vn > 1.5) this.particles.sparks(x, this.carY + 0.4, z, v.x, v.z, Math.min(30, (-vn * 3) | 0));
+          this.damage.impact(x, this.carY + 0.35 + Math.random() * 0.25, z, nx, nz, -vn);
         }
       }
     }
@@ -760,6 +889,8 @@ export class Game {
       const rn = rx * nz - rz * nx;
       const J = (-(1 + 0.3) * vn) / (1 / m + 1 / mAI + (rn * rn) / I);
       car.applyImpulse(nx * J, nz * J, cx, cz);
+      ai.damage?.impact(cx, ai.h + ROAD_Y + 0.45, cz, -nx, -nz, -vn);
+      this.damage.impact(cx, this.carY + 0.45, cz, nx, nz, -vn);
       const dvAI = J / mAI;
       const along = -(nx * Math.sin(ai.psi) + nz * Math.cos(ai.psi)) * dvAI;
       ai.push(-nx, -nz, dvAI, along);
@@ -874,6 +1005,7 @@ export class Game {
     const rows = [{ player: true, prog: this.prog, name: 'YOU', color: hexCss(PAINT_COLORS[this.cfg.color] ?? this.spec.color) }];
     for (const ai of this.ais) rows.push({ ai, prog: ai.s, name: ai.name, color: hexCss(ai.color) });
     const order = (r) => {
+      if (r.player && this.retired) return -1e9;
       const idx = this.finishOrder.indexOf(r.player ? 'player' : r.ai);
       return idx >= 0 ? 1e9 - idx : r.prog;
     };
@@ -894,13 +1026,15 @@ export class Game {
     // Prize money.
     const fastestLap = this.ais.every((a) => !(a.bestLap < this.bestLap));
     const topKmh = this.topSpeed * 3.6;
-    const reward = raceReward({
+    let reward = raceReward({
       position: this.finishPosition, opponents: this.ais.length, laps: this.laps, difficulty: this.cfg.difficulty,
       trackKm: this.track.length / 1000, fastestLap: fastestLap && this.ais.length > 0,
       drift: this.drift.total + Math.round(this.drift.combo), overtakes: this.overtakes,
       topSpeedBonus: Math.min(1500, Math.max(0, Math.round((topKmh - 200) * 8 / 10) * 10)),
     });
+    if (this.retired) reward = { lines: [['DNF: engine destroyed', 0]], total: 0 };
     this._pay(reward.total);
+    this._repairBill(reward);
     if (this.cfg.pink && this.ais[0]?.rival) {
       // Pink-slip race against the lead rival.
       const rv = this.ais[0].rival;
@@ -925,6 +1059,7 @@ export class Game {
     return {
       track: TRACKS[this.cfg.track].name,
       position: this.finishPosition,
+      dnf: this.retired,
       story: this.cfg.story || null,
       pink: !!this.cfg.pink,
       reward,
@@ -932,7 +1067,7 @@ export class Game {
       topSpeed: this.topSpeed,
       rows: rows.map((r, i) => {
         let time;
-        if (r.player) time = fmtTime(this.finishTime);
+        if (r.player) time = this.retired ? 'DNF' : fmtTime(this.finishTime);
         else if (r.ai.finished) time = fmtTime(r.ai.finishTime);
         else {
           const remaining = this.laps * this.track.length - r.ai.s;

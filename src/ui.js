@@ -5,6 +5,7 @@
 
 import { TRACKS } from './track.js';
 import { STATIONS } from './radio.js';
+import { DAMAGE_MODES, DAMAGE_NAMES } from './damage.js';
 import { CARS, PAINT_COLORS, findCar } from './cars.js';
 import { saveSettings, loadJSON } from './settings.js';
 import { getTrack } from './game.js';
@@ -23,6 +24,7 @@ import {
 const hexCss = (h) => '#' + h.toString(16).padStart(6, '0');
 const DIFF = ['Easy', 'Medium', 'Hard', 'Pro'];
 
+const signed = (v) => (v < 0 ? '−' + fmtMoney(-v) : '+' + fmtMoney(v));
 const BRAKE_FEEL = { 1: 'Sharp (linear)', 1.4: 'Firm', 1.8: 'Medium', 2.3: 'Soft' };
 
 export class UI {
@@ -304,6 +306,7 @@ export class UI {
           ${this._optRow('abs', 'ABS + braking stability', onoff(S.abs))}
           ${this._optRow('brakeCurve', 'Brake pedal feel', BRAKE_FEEL[S.brakeCurve] || 'Medium')}
           ${this._optRow('brakeStrength', 'Brake strength', pct(S.brakeStrength))}
+          ${this._optRow('damage', 'Crash damage', DAMAGE_NAMES[S.damage] || 'Realistic')}
           ${this._optRow('tc', 'Traction control', onoff(S.tc))}
           ${this._optRow('stability', 'Stability assist', onoff(S.stability))}
           <h4>Wheel</h4>
@@ -448,6 +451,7 @@ export class UI {
         break;
       case 'ffbtest': this.ffb.test(this.S.ffbInvert); break;
       case 'resume': this.togglePause(); break;
+      case 'repair': this.game.repairCar(); this.togglePause(); break;
       case 'restart': this.closeOverlay(); this.game.restart(); this._enterRace(); break;
       case 'quit':
         this.closeOverlay();
@@ -674,6 +678,7 @@ export class UI {
       case 'transmission': S.transmission = cyc(['h', 'seq', 'auto'], S.transmission); break;
       case 'timeOfDay': S.timeOfDay = cyc(['default', 'day', 'sunset', 'night'], S.timeOfDay); break;
       case 'weather': S.weather = S.weather === 'rain' ? 'dry' : 'rain'; break;
+      case 'damage': S.damage = cyc(DAMAGE_MODES, S.damage); break;
       case 'brakeCurve': S.brakeCurve = cyc([1, 1.4, 1.8, 2.3], S.brakeCurve); break;
       case 'brakeStrength': S.brakeStrength = +step(S.brakeStrength, 0.5, 1, 0.05).toFixed(2); break;
       case 'wheelRange': S.wheelRange = step(S.wheelRange, 180, 1080, 30); break;
@@ -763,6 +768,7 @@ export class UI {
       <div class="menu-list">
         <button class="btn big nav" data-act="resume" data-default="1">Resume</button>
         <button class="btn big nav" data-act="restart">Restart</button>
+        ${this.game.canRepair?.() && this.game.damage?.enabled ? '<button class="btn big nav" data-act="repair">Repair car</button>' : ''}
         <button class="btn big nav mod-btn" data-act="pausemods">Mod Menu${modsActive(this.mods) ? ' <small>ON</small>' : ''}</button>
         <button class="btn big nav" data-act="pauseradio">📻 ${this.S.radio < 0 ? 'Radio off' : STATIONS[this.S.radio].name}</button>
         <button class="btn big nav" data-act="quit">Quit to menu</button>
@@ -783,13 +789,13 @@ export class UI {
   _overlay_results() {
     const r = this.lastResults;
     const rows = r.rows.map((x) => `<tr class="${x.player ? 'me' : ''}"><td>${x.pos}</td><td><i class="dot" style="background:${x.color}"></i>${esc(x.name)}</td><td>${esc(x.car)}</td><td>${x.best}</td><td>${x.time}</td></tr>`).join('');
-    const pay = r.reward.lines.map(([label, v]) => `<div><span>${esc(label)}</span>${v ? `<b>+${fmtMoney(v)}</b>` : ''}</div>`).join('');
+    const pay = r.reward.lines.map(([label, v]) => `<div><span>${esc(label)}</span>${v ? `<b class="${v < 0 ? 'neg' : ''}">${signed(v)}</b>` : ''}</div>`).join('');
     return `
-      <h1 class="title">${r.position === 1 ? 'Victory!' : `You finished P${r.position}`}</h1>
+      <h1 class="title">${r.dnf ? 'Retired' : r.position === 1 ? 'Victory!' : `You finished P${r.position}`}</h1>
       <p class="dim">${esc(r.track)} · top speed ${Math.round(this.S.units === 'mph' ? r.topSpeed * 2.23694 : r.topSpeed * 3.6)} ${this.S.units === 'mph' ? 'mph' : 'km/h'}</p>
       <div class="results-wrap">
         <table class="results"><thead><tr><th>Pos</th><th>Driver</th><th>Car</th><th>Best lap</th><th>Time</th></tr></thead><tbody>${rows}</tbody></table>
-        <div class="earnings"><h4>Earnings</h4>${pay}<div class="total"><span>Total</span><b>+${fmtMoney(r.reward.total)}</b></div><div class="bal"><span>Balance</span><b>${fmtMoney(r.balance)}</b></div></div>
+        <div class="earnings"><h4>Earnings</h4>${pay}<div class="total"><span>Total</span><b>${signed(r.reward.total)}</b></div><div class="bal"><span>Balance</span><b>${fmtMoney(r.balance)}</b></div></div>
       </div>
       <div class="menu-list row">
         ${r.story ? `<button class="btn primary big nav" data-act="storyNext" data-default="1">Continue story</button>${r.pink ? '' : '<button class="btn big nav" data-act="storyRetry">Try again</button>'}` : `<button class="btn primary big nav" data-act="again" data-default="1">Race again</button>

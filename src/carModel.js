@@ -4,6 +4,8 @@
 // Car local space: +z forward, +x LEFT, +y up, origin on the ground under the CG.
 
 import * as THREE from 'three';
+import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
+import { TessellateModifier } from 'three/addons/modifiers/TessellateModifier.js';
 
 const STYLES = {
   gt: { len: 4.5, width: 1.9, bottom: 0.24, noseH: 0.58, hoodH: 0.86, cowl: 0.62, roofFront: -0.05, roofBack: -0.85, roofH: 1.25, deckStart: -1.5, deckH: 0.98, tailH: 1.0, wing: 'small', cabinW: 0.76 },
@@ -130,6 +132,53 @@ function makeWheel(R, left, mats) {
   return { pivot, spin };
 }
 
+const _m1 = new THREE.Matrix4(), _m2 = new THREE.Matrix4(), _m3 = new THREE.Matrix4();
+const _v1 = new THREE.Vector3(), _v2 = new THREE.Vector3(), _v3 = new THREE.Vector3(), _v4 = new THREE.Vector3();
+const _up = new THREE.Vector3(0, 1, 0);
+function isUnder(o, root) {
+  for (let p = o; p; p = p.parent) if (p === root) return true;
+  return false;
+}
+
+let _crackTex = null;
+function crackTexture() {
+  if (_crackTex) return _crackTex;
+  const c = document.createElement('canvas');
+  c.width = c.height = 256;
+  const g = c.getContext('2d');
+  g.fillStyle = 'rgba(40,46,54,1)';
+  g.fillRect(0, 0, 256, 256);
+  g.strokeStyle = 'rgba(235,240,245,0.85)';
+  for (let k = 0; k < 3; k++) {
+    const cx = 40 + Math.random() * 176, cy = 40 + Math.random() * 176;
+    for (let i = 0; i < 14; i++) {
+      let x = cx, y = cy;
+      const a0 = (i / 14) * Math.PI * 2 + Math.random() * 0.3;
+      g.lineWidth = 1 + Math.random();
+      g.beginPath();
+      g.moveTo(x, y);
+      for (let j = 0; j < 6; j++) {
+        const a = a0 + (Math.random() - 0.5) * 0.6;
+        x += Math.cos(a) * (10 + Math.random() * 18);
+        y += Math.sin(a) * (10 + Math.random() * 18);
+        g.lineTo(x, y);
+      }
+      g.stroke();
+    }
+    for (let ring = 1; ring < 4; ring++) {
+      g.beginPath();
+      g.arc(cx, cy, ring * 14 + Math.random() * 6, 0, Math.PI * 2);
+      g.lineWidth = 0.8;
+      g.stroke();
+    }
+  }
+  _crackTex = new THREE.CanvasTexture(c);
+  _crackTex.wrapS = _crackTex.wrapT = THREE.RepeatWrapping;
+  _crackTex.repeat.set(0.6, 0.6);
+  _crackTex.colorSpace = THREE.SRGBColorSpace;
+  return _crackTex;
+}
+
 export class CarModel {
   constructor(spec, color, { number = 7, cockpit = false, helmet = 0xffffff, glow = null } = {}) {
     this.spec = spec;
@@ -139,6 +188,16 @@ export class CarModel {
     this.root = new THREE.Group();
     this.body = new THREE.Group(); // receives pitch/roll
     this.root.add(this.body);
+    // Damage: meshes that dent, and parts that can break off.
+    this.deformables = [];
+    this.parts = [];
+    const part = (id, obj, kind, hp, extra = {}) => {
+      obj.updateMatrix();
+      const anchor = new THREE.Vector3();
+      new THREE.Box3().setFromObject(obj, true).getCenter(anchor);
+      this.parts.push({ id, obj, kind, hp, maxHp: hp, anchor, parent: obj.parent, pos: obj.position.clone(), rot: obj.rotation.clone(), detached: false, broken: false, ...extra });
+    };
+    this._part = part;
 
     const paint = new THREE.MeshPhysicalMaterial({ color, metalness: 0.45, roughness: 0.3, clearcoat: 1, clearcoatRoughness: 0.08 });
     this.paint = paint;
@@ -160,6 +219,7 @@ export class CarModel {
     body.castShadow = true;
     body.receiveShadow = true;
     this.body.add(body);
+    this.deformables.push(body);
 
     // Door panels closing the sides of the cockpit tub.
     const doorGeo = cached('door' + key, () => {
@@ -179,6 +239,8 @@ export class CarModel {
       door.position.x = sx > 0 ? st.width / 2 - 0.0 : -st.width / 2 + 0.05;
       door.castShadow = true;
       this.body.add(door);
+      this.deformables.push(door);
+      part(sx > 0 ? 'doorL' : 'doorR', door, 'panel', 26);
     }
     const tubMat = new THREE.MeshStandardMaterial({ color: 0x121214, roughness: 0.9 });
     const floor = new THREE.Mesh(new THREE.BoxGeometry(st.width - 0.12, 0.04, st.cowl - st.deckStart), tubMat);
@@ -198,34 +260,91 @@ export class CarModel {
     const cabin = new THREE.Mesh(cached('cabin' + key, () => extrude(cabinShape(st, zOff), cabW, 0.06)), glass);
     cabin.castShadow = true;
     this.body.add(cabin);
+    this.cabin = cabin;
+    this.glassMat = glass;
+    this.deformables.push(cabin);
     const roofLen = st.roofFront - st.roofBack;
     const roof = new THREE.Mesh(new THREE.BoxGeometry(cabW - 0.02, 0.05, roofLen + 0.05), paint);
     roof.position.set(0, st.roofH + 0.03, (st.roofFront + st.roofBack) / 2 + zOff);
     roof.castShadow = true;
     this.body.add(roof);
+    this.deformables.push(roof);
 
     // Underbody fill + front splitter + diffuser.
     const under = new THREE.Mesh(new THREE.BoxGeometry(st.width - 0.5, 0.2, st.len - 0.4), dark);
     under.position.set(0, st.bottom + 0.06, zOff);
     this.body.add(under);
+    // Bumpers (painted, with the splitter and grille on the front one).
+    const f = st.len / 2 + zOff, r = -st.len / 2 + zOff;
+    const bumpH = Math.min(0.3, st.noseH * 0.62 - st.bottom + 0.06);
+    const frontBumper = new THREE.Group();
+    const fb = new THREE.Mesh(cached('bump' + key, () => new RoundedBoxGeometry(st.width - 0.06, bumpH, 0.26, 2, 0.06)), paint);
+    fb.position.set(0, st.bottom + bumpH / 2, f - 0.1);
+    fb.castShadow = true;
+    frontBumper.add(fb);
+    this.deformables.push(fb);
     const splitter = new THREE.Mesh(new THREE.BoxGeometry(st.width - 0.1, 0.04, 0.3), trim);
-    splitter.position.set(0, st.bottom - 0.02, st.len / 2 + zOff - 0.12);
-    this.body.add(splitter);
-
-    // Grille / lights.
+    splitter.position.set(0, st.bottom - 0.02, f - 0.12);
+    frontBumper.add(splitter);
     const grille = new THREE.Mesh(new THREE.BoxGeometry(st.width * 0.5, 0.14, 0.05), trim);
-    grille.position.set(0, st.noseH * 0.45, st.len / 2 + zOff + 0.01);
-    this.body.add(grille);
+    grille.position.set(0, Math.max(st.bottom + bumpH + 0.06, st.noseH * 0.45), f + 0.01);
+    frontBumper.add(grille);
+    this.body.add(frontBumper);
+    part('bumperF', frontBumper, 'panel', 18);
+    const rearBumper = new THREE.Group();
+    const rbH = Math.min(0.32, st.tailH - 0.3 - st.bottom);
+    const rb = new THREE.Mesh(cached('rbump' + key, () => new RoundedBoxGeometry(st.width - 0.06, rbH, 0.24, 2, 0.06)), paint);
+    rb.position.set(0, st.bottom + rbH / 2 + 0.02, r + 0.08);
+    rb.castShadow = true;
+    rearBumper.add(rb);
+    this.deformables.push(rb);
+    this.body.add(rearBumper);
+    part('bumperR', rearBumper, 'panel', 18);
+
+    // Bonnet: a panel following the body's curve, hinged at the windscreen
+    // end so it can spring open in a crash before it tears off.
+    const hz0 = f - 0.45, hy0 = st.noseH + 0.06, hz1 = st.cowl + zOff, hy1 = st.hoodH;
+    const hingeZ = hz1 - 0.02;
+    const hoodGeo = cached('hood' + key, () => {
+      const curve = new THREE.QuadraticBezierCurve(new THREE.Vector2(hz0, hy0), new THREE.Vector2(st.cowl + 0.6 + zOff, st.hoodH - 0.02), new THREE.Vector2(hz1, hy1));
+      const pts = curve.getPoints(12);
+      const sh = new THREE.Shape();
+      pts.forEach((p, i) => (i ? sh.lineTo(p.x - hingeZ, p.y + 0.014) : sh.moveTo(p.x - hingeZ, p.y + 0.014)));
+      for (let i = pts.length - 1; i >= 0; i--) sh.lineTo(pts[i].x - hingeZ, pts[i].y - 0.02);
+      const w = st.width * 0.8;
+      const g = new THREE.ExtrudeGeometry(sh, { depth: w, bevelEnabled: false });
+      g.rotateY(-Math.PI / 2);
+      g.translate(w / 2, -hy1, 0);
+      g.computeVertexNormals();
+      return g;
+    });
+    const hood = new THREE.Mesh(hoodGeo, paint);
+    hood.castShadow = true;
+    const hoodPivot = new THREE.Group();
+    hoodPivot.position.set(0, hy1, hingeZ);
+    hoodPivot.add(hood);
+    this.body.add(hoodPivot);
+    this.deformables.push(hood);
+    part('hood', hoodPivot, 'hood', 22);
+
+    // Lights.
     this.headMat = new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0xfff6e0, emissiveIntensity: 1.2 });
     this.tailMat = new THREE.MeshStandardMaterial({ color: 0x550000, emissive: 0xff1010, emissiveIntensity: 0.6 });
+    this.headMats = [];
+    this.tailMats = [];
     for (const sx of [1, -1]) {
-      const hl = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.09, 0.1), this.headMat);
+      const hm = this.headMat.clone(), tm = this.tailMat.clone();
+      this.headMats.push(hm);
+      this.tailMats.push(tm);
+      const hl = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.09, 0.1), hm);
       hl.position.set(sx * (st.width / 2 - 0.32), st.noseH * 0.85, st.len / 2 + zOff - 0.28);
       hl.rotation.x = -0.35;
       this.body.add(hl);
-      const tl = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.1, 0.06), this.tailMat);
+      part(sx > 0 ? 'headL' : 'headR', hl, 'light', 5, { mat: hm });
+      const tl = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.1, 0.06), tm);
       tl.position.set(sx * (st.width / 2 - 0.35), st.tailH - 0.16, -st.len / 2 + zOff - 0.005);
       this.body.add(tl);
+      part(sx > 0 ? 'tailL' : 'tailR', tl, 'light', 5, { mat: tm });
       const ex = new THREE.Mesh(cached('exhaust', () => new THREE.CylinderGeometry(0.05, 0.05, 0.2, 10).rotateX(Math.PI / 2)), mats.rim);
       ex.position.set(sx * 0.35, st.bottom + 0.12, -st.len / 2 + zOff - 0.02);
       this.body.add(ex);
@@ -233,6 +352,7 @@ export class CarModel {
       const mirror = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.09, 0.12), paint);
       mirror.position.set(sx * (cabW / 2 + 0.12), st.hoodH + 0.08, st.cowl + zOff - 0.12);
       this.body.add(mirror);
+      part(sx > 0 ? 'mirrorL' : 'mirrorR', mirror, 'panel', 5);
     }
 
     // Stripes.
@@ -249,27 +369,31 @@ export class CarModel {
     // Wings.
     if (st.wing === 'big' || st.wing === 'small') {
       const big = st.wing === 'big';
+      const wingGroup = new THREE.Group();
+      this.body.add(wingGroup);
       const wing = new THREE.Mesh(new THREE.BoxGeometry(st.width - (big ? 0.05 : 0.25), 0.05, big ? 0.42 : 0.3), trim);
       const wy = st.tailH + (big ? 0.38 : 0.2);
       wing.position.set(0, wy, -st.len / 2 + zOff + 0.25);
       wing.rotation.x = 0.12;
       wing.castShadow = true;
-      this.body.add(wing);
+      wingGroup.add(wing);
       for (const sx of [1, -1]) {
         const stand = new THREE.Mesh(new THREE.BoxGeometry(0.05, wy - st.tailH + 0.05, 0.16), trim);
         stand.position.set(sx * (big ? 0.55 : 0.45), (wy + st.tailH) / 2, -st.len / 2 + zOff + 0.28);
-        this.body.add(stand);
+        wingGroup.add(stand);
         if (big) {
           const plate = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.3, 0.5), paint);
           plate.position.set(sx * (st.width / 2 - 0.02), wy, -st.len / 2 + zOff + 0.25);
-          this.body.add(plate);
+          wingGroup.add(plate);
         }
       }
+      part('wing', wingGroup, 'panel', 14);
     } else if (st.wing === 'duck') {
       const duck = new THREE.Mesh(new THREE.BoxGeometry(st.width - 0.2, 0.06, 0.25), paint);
       duck.position.set(0, st.tailH + 0.03, -st.len / 2 + zOff + 0.12);
       duck.rotation.x = 0.35;
       this.body.add(duck);
+      part('spoiler', duck, 'panel', 12);
     }
 
     // Race numbers on the doors and bonnet.
@@ -279,11 +403,13 @@ export class CarModel {
       plate.position.set(sx * (st.width / 2 + 0.035), (st.bottom + st.hoodH) / 2 + 0.04, zOff - 0.2);
       plate.rotation.y = sx * Math.PI / 2;
       this.body.add(plate);
+      this.deformables.push(plate);
     }
     const bonnet = new THREE.Mesh(new THREE.CircleGeometry(0.24, 24), numMat);
     bonnet.rotation.x = -Math.PI / 2 + 0.12;
-    bonnet.position.set(0, st.noseH + 0.12, st.len / 2 + zOff - 0.75);
-    this.body.add(bonnet);
+    bonnet.position.set(0, st.noseH + 0.136, f - 0.75 - hingeZ);
+    bonnet.position.y -= hy1;
+    hood.add(bonnet);
 
     // Driver.
     const driverX = Math.min(0.37, cabW * 0.27);
@@ -301,6 +427,7 @@ export class CarModel {
       w.pivot.position.set((left ? 1 : -1) * (spec.track / 2), R, z);
       this.root.add(w.pivot);
       this.wheels.push(w);
+      part('wheel' + ['FL', 'FR', 'RL', 'RR'][this.wheels.length - 1], w.pivot, 'wheel', 60);
     }
 
     this.eye = new THREE.Vector3(driverX, eyeY, eyeZ);
@@ -457,8 +584,15 @@ export class CarModel {
       w.spin.rotation.x = i < 2 ? spinFront : spinRear;
     }
     this.body.rotation.set(pitch, 0, roll, 'YXZ');
-    this.tailMat.emissiveIntensity = braking ? 3.2 : lights ? 1.0 : 0.5;
-    this.headMat.emissiveIntensity = lights ? 3 : 1.2;
+    for (const m of this.tailMats) if (!m.userData.broken) m.emissiveIntensity = braking ? 3.2 : lights ? 1.0 : 0.5;
+    for (const m of this.headMats) if (!m.userData.broken) m.emissiveIntensity = lights ? 3 : 1.2;
+    if (this.camber) {
+      for (let i = 0; i < 4; i++) {
+        const w = this.wheels[i];
+        w.pivot.rotation.z = this.camber[i];
+        w.pivot.position.y = this.spec.wheelRadius - this.flat[i] * 0.075;
+      }
+    }
     if (this.steeringWheel) this.steeringWheel.rotation.z = (wheelDeg * Math.PI) / 180;
   }
 
@@ -517,6 +651,166 @@ export class CarModel {
 
   setColor(hex) {
     this.paint.color.setHex(hex);
+  }
+
+  // ------------------------------------------------------------- damage
+  // Dent the bodywork: P (point) and D (crush direction, unit) are in body
+  // space. Meshes get extra vertices the first time they're hit so the
+  // panels can crumple.
+  crush(P, D, depth, radius) {
+    this.root.updateMatrixWorld(true);
+    const inv = _m1.copy(this.body.matrixWorld).invert();
+    const side = _v3.crossVectors(D, _up);
+    if (side.lengthSq() < 1e-4) side.set(1, 0, 0);
+    side.normalize();
+    for (const mesh of this.deformables) {
+      if (!isUnder(mesh, this.body)) continue;
+      // Quick reject on the mesh's bounds.
+      const rel = _m2.multiplyMatrices(inv, mesh.matrixWorld);
+      if (!mesh.geometry.boundingSphere) mesh.geometry.computeBoundingSphere();
+      const bs = mesh.geometry.boundingSphere;
+      _v1.copy(bs.center).applyMatrix4(rel);
+      if (_v1.distanceTo(P) > bs.radius + radius) continue;
+      const dm = this._prepDeform(mesh);
+      const relInv = _m3.copy(rel).invert();
+      const p = _v1.copy(P).applyMatrix4(relInv);
+      const d = _v2.copy(D).transformDirection(relInv);
+      const sd = _v4.copy(side).transformDirection(relInv);
+      const pos = mesh.geometry.attributes.position;
+      const a = pos.array, base = dm.base, r2 = radius * radius;
+      let moved = false;
+      for (let i = 0, n = pos.count; i < n; i++) {
+        const k = i * 3;
+        const dx = base[k] - p.x, dy = base[k + 1] - p.y, dz = base[k + 2] - p.z;
+        const d2 = dx * dx + dy * dy + dz * dz;
+        if (d2 >= r2) continue;
+        const f = 1 - d2 / r2;
+        let amt = depth * f * f * (0.75 + 0.5 * dm.noise[i]);
+        const room = dm.max - dm.crushed[i];
+        if (room <= 0) continue;
+        if (amt > room) amt = room;
+        dm.crushed[i] += amt;
+        const wr = (dm.noise[i] - 0.5) * amt * 0.28; // crumple wrinkles
+        dm.off[k] += d.x * amt + sd.x * wr;
+        dm.off[k + 1] += d.y * amt + sd.y * wr;
+        dm.off[k + 2] += d.z * amt + sd.z * wr;
+        moved = true;
+      }
+      if (!moved) continue;
+      for (let i = 0; i < a.length; i++) a[i] = base[i] + dm.off[i];
+      pos.needsUpdate = true;
+      mesh.geometry.computeVertexNormals();
+      mesh.geometry.computeBoundingSphere();
+    }
+  }
+
+  _prepDeform(mesh) {
+    if (mesh.userData.dmg) return mesh.userData.dmg;
+    const orig = mesh.geometry;
+    let g = orig.index ? orig.toNonIndexed() : orig.clone();
+    g = new TessellateModifier(0.24, 6).modify(g);
+    const pos = g.attributes.position;
+    const base = Float32Array.from(pos.array);
+    const noise = new Float32Array(pos.count);
+    for (let i = 0; i < pos.count; i++) {
+      const h = Math.sin(base[i * 3] * 127.1 + base[i * 3 + 1] * 311.7 + base[i * 3 + 2] * 74.7) * 43758.5453;
+      noise[i] = h - Math.floor(h);
+    }
+    mesh.geometry = g;
+    const dm = { orig, base, noise, off: new Float32Array(base.length), crushed: new Float32Array(pos.count), max: 0.55 };
+    mesh.userData.dmg = dm;
+    return dm;
+  }
+
+  // Wear a part down; returns 'pop' | 'sag' | 'broken' | 'detach' | null.
+  hurtPart(part, amount) {
+    if (part.detached) return null;
+    part.hp -= amount;
+    const frac = part.hp / part.maxHp;
+    if (part.hp <= 0 && part.kind !== 'wheel') return 'detach';
+    if (part.kind === 'wheel') return part.hp <= 0 ? 'detach' : null;
+    if (part.kind === 'light' && !part.broken && frac < 0.6) {
+      part.broken = true;
+      part.mat.userData.broken = true;
+      part.mat.emissiveIntensity = 0;
+      part.mat.color.setHex(0x222428);
+      return 'broken';
+    }
+    if (part.kind === 'hood' && !part.popped && frac < 0.55) {
+      part.popped = true;
+      part.obj.rotation.x = -(0.22 + Math.random() * 0.35);
+      part.obj.rotation.z = (Math.random() - 0.5) * 0.12;
+      return 'pop';
+    }
+    if (part.kind === 'panel' && !part.sagged && frac < 0.5) {
+      part.sagged = true;
+      part.obj.rotation.z += (Math.random() - 0.5) * 0.18;
+      part.obj.rotation.x += (Math.random() - 0.5) * 0.1;
+      part.obj.position.y -= 0.03;
+      return 'sag';
+    }
+    return null;
+  }
+
+  // Take a part off the car; returns its world transform for the debris sim.
+  detachPart(part) {
+    if (part.detached) return null;
+    part.detached = true;
+    this.root.updateMatrixWorld(true);
+    const m = part.obj.matrixWorld.clone();
+    part.obj.parent?.remove(part.obj);
+    if (part.kind === 'light') { part.mat.userData.broken = true; part.mat.emissiveIntensity = 0; }
+    return m;
+  }
+
+  // Bent wheels (camber, radians) and flat tyres (0..1) for the visuals.
+  setWheelDamage(camber, flat) {
+    this.camber = camber;
+    this.flat = flat;
+  }
+
+  setGlassDamage(level) {
+    const want = level > 0.25;
+    if (want === !!this._cracked) return;
+    this._cracked = want;
+    if (want) {
+      this.glassMat.map = crackTexture();
+      this.glassMat.color.setHex(0x9aa3ad);
+      this.glassMat.opacity = 0.9;
+    } else {
+      this.glassMat.map = null;
+      this.glassMat.color.setHex(0x0c1016);
+      this.glassMat.opacity = 0.78;
+    }
+    this.glassMat.needsUpdate = true;
+  }
+
+  // Put everything back the way it left the factory.
+  repair() {
+    for (const mesh of this.deformables) {
+      const dm = mesh.userData.dmg;
+      if (!dm) continue;
+      mesh.geometry.dispose();
+      mesh.geometry = dm.orig;
+      mesh.userData.dmg = null;
+    }
+    for (const p of this.parts) {
+      if (p.detached) {
+        p.obj.parent?.remove(p.obj);
+        p.parent.add(p.obj);
+      }
+      p.obj.position.copy(p.pos);
+      p.obj.rotation.copy(p.rot);
+      p.hp = p.maxHp;
+      p.detached = p.broken = p.popped = p.sagged = false;
+      if (p.mat) {
+        p.mat.userData.broken = false;
+        p.mat.color.setHex(p.kind === 'light' && p.id.startsWith('head') ? 0xffffff : 0x550000);
+      }
+    }
+    this.camber = null;
+    for (const w of this.wheels) { w.pivot.rotation.z = 0; w.pivot.position.y = this.spec.wheelRadius; }
+    this.setGlassDamage(0);
   }
 
   dispose() {

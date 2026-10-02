@@ -86,6 +86,14 @@ export class Particles {
     }
   }
 
+  glass(x, y, z, vx, vz, n = 12) {
+    for (let k = 0; k < n; k++) {
+      this.emit(1, x + (Math.random() - 0.5) * 0.4, y, z + (Math.random() - 0.5) * 0.4,
+        vx * 0.6 + (Math.random() - 0.5) * 5, 0.8 + Math.random() * 3, vz * 0.6 + (Math.random() - 0.5) * 5,
+        0.6 + Math.random() * 0.6, 0.06 + Math.random() * 0.05, 0.78, 0.9, 0.98);
+    }
+  }
+
   update(dt) {
     for (let i = 0; i < this.max; i++) {
       const a = (this.age[i] += dt);

@@ -75,13 +75,28 @@ export class HUD {
         </div>
       </div>
       <div class="hud-shift" id="h-shift">SHIFT</div>
+      <div class="hud-dmg" id="h-dmg">
+        <svg viewBox="0 0 64 104" class="dmg-car">
+          <rect x="14" y="8" width="36" height="88" rx="10" fill="rgba(255,255,255,0.06)" stroke="rgba(255,255,255,0.25)" stroke-width="1.5"/>
+          <path id="h-dz-front" d="M16 30 V16 Q16 10 22 10 H42 Q48 10 48 16 V30 Z"/>
+          <path id="h-dz-rear" d="M16 74 V88 Q16 94 22 94 H42 Q48 94 48 88 V74 Z"/>
+          <rect id="h-dz-left" x="16" y="32" width="6" height="40" rx="2"/>
+          <rect id="h-dz-right" x="42" y="32" width="6" height="40" rx="2"/>
+          <rect id="h-dz-top" x="25" y="38" width="14" height="26" rx="3"/>
+          <rect id="h-dw-0" x="5" y="16" width="7" height="16" rx="2"/>
+          <rect id="h-dw-1" x="52" y="16" width="7" height="16" rx="2"/>
+          <rect id="h-dw-2" x="5" y="72" width="7" height="16" rx="2"/>
+          <rect id="h-dw-3" x="52" y="72" width="7" height="16" rx="2"/>
+        </svg>
+        <div class="dmg-info"><b id="h-dmg-eng">ENGINE</b><span id="h-dmg-temp"></span></div>
+      </div>
       <div class="hud-rewind" id="h-rewind">◀◀ REWIND</div>
       <div class="hud-replay" id="h-replay"><b>● REPLAY</b><span id="h-rptime"></span><div class="rp-bar"><i id="h-rpfill"></i></div><span id="h-rpcam"></span><em>Gas/Enter play-pause · ◀ ▶ seek · Camera/▲▼ change cam · Brake/Esc exit</em></div>
       <div class="hud-job" id="h-job"><div class="jt"><b id="h-jobtitle"></b><span id="h-jobtimer"></span></div><div id="h-jobl1"></div><div id="h-jobl2"></div></div>
     `;
     const $ = (id) => root.querySelector('#' + id);
     this.el = {};
-    for (const id of ['pos', 'of', 'lap', 'laps', 'board', 'cur', 'last', 'best', 'delta', 'map', 'leds', 'rpmfill', 'rpmred', 'gear', 'speed', 'unit', 'abs', 'tc', 'clutch', 'trans', 'tele', 'wheel', 'pc', 'pb', 'pt', 'hp', 'knob', 'msg', 'sub', 'lights', 'nitro', 'nitrofill', 'mods', 'drift', 'cash', 'drag', 'dragname2', 'dragtime', 'dragyou', 'dragthem', 'shift', 'tree-you', 'tree-them', 'job', 'jobtitle', 'jobtimer', 'jobl1', 'jobl2', 'rewind', 'replay', 'rptime', 'rpfill', 'rpcam']) {
+    for (const id of ['pos', 'of', 'lap', 'laps', 'board', 'cur', 'last', 'best', 'delta', 'map', 'leds', 'rpmfill', 'rpmred', 'gear', 'speed', 'unit', 'abs', 'tc', 'clutch', 'trans', 'tele', 'wheel', 'pc', 'pb', 'pt', 'hp', 'knob', 'msg', 'sub', 'lights', 'nitro', 'nitrofill', 'mods', 'drift', 'cash', 'drag', 'dragname2', 'dragtime', 'dragyou', 'dragthem', 'shift', 'tree-you', 'tree-them', 'job', 'jobtitle', 'jobtimer', 'jobl1', 'jobl2', 'rewind', 'replay', 'rptime', 'rpfill', 'rpcam', 'dmg', 'dmg-eng', 'dmg-temp', 'dz-front', 'dz-rear', 'dz-left', 'dz-right', 'dz-top', 'dw-0', 'dw-1', 'dw-2', 'dw-3']) {
       this.el[id] = $('h-' + id);
     }
     this.ledEls = [];
@@ -238,6 +253,27 @@ export class HUD {
       this.subTimer -= d.dt;
       if (this.subTimer <= 0) e.sub.classList.remove('show');
     }
+  }
+
+  // Damage diagram: zones go green -> yellow -> red, wheels show bends and flats.
+  setDamage(d) {
+    const e = this.el;
+    const any = d.enabled && (d.total > 0.004 || d.engine > 0 || d.tyre.some((t) => t < 0.99) || d.temp > 100);
+    e.dmg.classList.toggle('show', any);
+    if (!any) return;
+    const col = (v) => (v <= 0.002 ? 'rgba(255,255,255,0.12)' : `hsl(${Math.round(110 * (1 - Math.min(1, v * 1.4)))}, 85%, 50%)`);
+    for (const z of ['front', 'rear', 'left', 'right', 'top']) e['dz-' + z].setAttribute('fill', col(d.zones[z]));
+    for (let i = 0; i < 4; i++) {
+      const w = e['dw-' + i];
+      w.setAttribute('fill', d.lost[i] ? 'none' : col(Math.max(d.bent[i], 1 - d.tyre[i])));
+      w.setAttribute('stroke', d.lost[i] ? '#ef4444' : 'none');
+      w.setAttribute('stroke-dasharray', d.lost[i] ? '2 2' : '');
+    }
+    const eng = d.dead ? 'ENGINE DEAD' : d.engine > 0.05 ? `ENGINE ${Math.round((1 - d.engine) * 100)}%` : 'ENGINE OK';
+    this._set('dmgeng', e['dmg-eng'], eng);
+    e['dmg-eng'].style.color = d.dead ? '#ef4444' : col(d.engine);
+    this._set('dmgtemp', e['dmg-temp'], d.radiator > 0.25 || d.temp > 100 ? `${Math.round(d.temp)}°C` : '');
+    e['dmg-temp'].classList.toggle('hot', d.temp > 112);
   }
 
   setReplay(on) {

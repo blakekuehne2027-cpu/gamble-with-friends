@@ -262,6 +262,18 @@ export class AudioSystem {
     if (g > 0.4) this._burst({ dur: 0.18, freq: 3500, q: 1.5, gain: 0.2 * g });
   }
 
+  // Metal crunch for parts breaking off.
+  crunch(strength) {
+    const s = Math.min(1, strength);
+    this._burst({ dur: 0.35, freq: 420, q: 1.1, gain: 0.45 * s + 0.12 });
+    this._burst({ dur: 0.22, freq: 1700 + Math.random() * 600, q: 7, gain: 0.22 * s, delay: 0.015 });
+    this._tone({ freq: 150 + Math.random() * 140, dur: 0.28, gain: 0.16 * s, type: 'square', slide: -90 });
+  }
+
+  glass() {
+    for (let i = 0; i < 6; i++) this._burst({ dur: 0.04 + Math.random() * 0.08, freq: 4200 + Math.random() * 4500, q: 9, gain: 0.16, delay: i * 0.02 + Math.random() * 0.03 });
+  }
+
   scrape(strength) {
     this._burst({ dur: 0.12, freq: 2800 + Math.random() * 1000, q: 3, gain: Math.min(0.3, strength * 0.25) });
   }

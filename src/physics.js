@@ -32,6 +32,8 @@ export class CarPhysics {
   constructor(spec) {
     this.setSpec(spec);
     this.reset(0, 0, 0);
+    // Crash damage modifiers (see damage.js); survives reset() until repaired.
+    this.dmg = { power: 1, steerMul: 1, toe: 0, gripF: 1, gripR: 1, drag: 1, roll: 0, engineDead: false };
   }
 
   // Swap in a new spec (upgrades / mods) without resetting the car's motion.
@@ -194,7 +196,7 @@ export class CarPhysics {
     }
 
     // Stall handling (only possible without auto clutch).
-    if (!this.engineOn) {
+    if (!this.engineOn && !this.dmg?.engineDead) {
       this.stallTimer += dt;
       if ((ctl.clutch > 0.7 || this.gear === 0) && this.stallTimer > 0.8) {
         this.engineOn = true;
@@ -216,7 +218,9 @@ export class CarPhysics {
     const absU = Math.abs(u);
 
     // --- Steering ---
-    this.delta = -clamp(inp.steer, -1, 1) * s.maxSteer;
+    const dmg = this.dmg;
+    this.delta = -clamp(inp.steer, -1, 1) * s.maxSteer * dmg.steerMul + dmg.toe;
+    if (dmg.engineDead) this.engineOn = false;
     const delta = this.delta;
 
     // --- Loads ---
@@ -226,8 +230,8 @@ export class CarPhysics {
     let Nr = (m * G * s.a) / this.L + transfer + down * (1 - s.aeroFront);
     Nf = Math.max(Nf, m * G * 0.12);
     Nr = Math.max(Nr, m * G * 0.12);
-    const muF = s.mu * s.frontGrip * env.mu;
-    const muR = s.mu * s.rearGrip * env.mu;
+    const muF = s.mu * s.frontGrip * env.mu * dmg.gripF;
+    const muR = s.mu * s.rearGrip * env.mu * dmg.gripR;
 
     // --- Engine ---
     let throttle = clamp(inp.throttle, 0, 1);
@@ -245,7 +249,7 @@ export class CarPhysics {
     if (this.engineOn) {
       // Nitrous adds torque on top of whatever the throttle asks for.
       const boost = inp.nitro ? 1 + (s.nitroBoost || 0.6) : 1;
-      const drive = this.torqueAt(rpm) * throttle * boost;
+      const drive = this.torqueAt(rpm) * throttle * boost * dmg.power;
       const braking = (1 - throttle) * (25 + rpm * 0.011);
       Te = drive - braking;
     } else {
@@ -396,8 +400,8 @@ export class CarPhysics {
     FyR = clamp(FyR, -cancelR, cancelR);
 
     // --- Resistances ---
-    const drag = 0.5 * RHO * s.cdA * u * Math.abs(u);
-    const rollC = 0.014 + env.drag * clamp(absU / 4, 0, 1);
+    const drag = 0.5 * RHO * s.cdA * dmg.drag * u * Math.abs(u);
+    const rollC = 0.014 + dmg.roll + env.drag * clamp(absU / 4, 0, 1);
     const roll = Math.sign(u) * Math.min(rollC * m * G, (m * absU) / h);
     const gradeF = -m * G * env.slope;
 
