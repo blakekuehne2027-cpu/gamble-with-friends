@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Redline Racing</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&family=Russo+One&display=swap" rel="stylesheet">
+<!--BUILD:CSS--><link rel="stylesheet" href="./style.css"><!--/BUILD:CSS-->
+</head>
+<body>
+<div id="app">
+  <div id="hud" class="hud"></div>
+  <div id="menu" class="menu"></div>
+  <div id="wizard" class="wizard-wrap"></div>
+  <div id="overlay" class="overlay"></div>
+  <div id="status" class="status"></div>
+  <div id="toast" class="toast"></div>
+  <div id="fps" class="fps"></div>
+  <div id="fatal" class="fatal"><div><h2>WebGL isn't available</h2><p>Redline needs a browser with hardware graphics. Try Chrome or Edge with hardware acceleration enabled.</p></div></div>
+</div>
+<!--BUILD:JS-->
+<script type="importmap">{ "imports": { "three": "../node_modules/three/build/three.module.js", "three/addons/": "../node_modules/three/examples/jsm/" } }</script>
+<script type="module" src="./main.js"></script>
+<!--/BUILD:JS-->
+</body>
+</html>
