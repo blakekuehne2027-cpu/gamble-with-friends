@@ -13,6 +13,7 @@ import { makeOpponents, BETS, betAmount, simulateRun, dragTrackIndex, carValue }
 import { jobBoard, fmtLap } from './jobs.js';
 import { CHARACTERS, CHAPTERS, storyState, chapter, currentEvent, meetsRequirement, eventPassed, completeEvent, eventConfig, bestOwnedTier } from './story.js';
 import { switchProfile, resetStory } from './career.js';
+import { ACHIEVEMENTS, isUnlocked, unlockedCount, unlock, checkGarage } from './achievements.js';
 import {
   UPGRADES, buyCar, buyUpgrade, upgradeLevel, upgradeCost, owns, buildSpec, perfStats, carColorIndex,
   saveCareer, saveMods, unlockCar, unlockAll, maxUpgrades, maxPrize, fmtMoney, MOD_DEFAULTS, modsActive, newCareer,
@@ -132,6 +133,7 @@ export class UI {
         <button class="btn big nav" data-act="jobs">Jobs</button>
         <button class="btn big nav" data-act="garage">Garage</button>
         <button class="btn big nav mod-btn" data-act="mods">Mod Menu${modsActive(this.mods) ? ' <small>ON</small>' : ''}</button>
+        <button class="btn big nav" data-act="achievements">Achievements <small class="count">${unlockedCount()}/${ACHIEVEMENTS.length}</small></button>
         <button class="btn big nav" data-act="wizard">Wheel Setup</button>
         <button class="btn big nav" data-act="settings">Settings</button>
         <button class="btn big nav" data-act="help">How to Play</button>
@@ -302,6 +304,7 @@ export class UI {
           ${this._optRow('steerRatio', 'Steering ratio (lower = quicker)', S.steerRatio + ':1')}
           <button class="btn nav" data-act="wizard">Run wheel setup again</button>
           <button class="btn nav" data-act="bindnitro">Set NITRO button on wheel${this.input.mapping?.buttons?.nitro ? ` (now: button ${this.input.mapping.buttons.nitro.button})` : ''}</button>
+          <button class="btn nav" data-act="bindrewind">Set REWIND button on wheel${this.input.mapping?.buttons?.rewind ? ` (now: button ${this.input.mapping.buttons.rewind.button})` : ''}</button>
           <h4>Career</h4>
           <button class="btn ghost nav" data-act="resetcareer">Reset career (money, cars, upgrades)</button>
         </div>
@@ -351,9 +354,10 @@ export class UI {
             <tr><td>C</td><td>Camera</td></tr><tr><td>B</td><td>Look back</td></tr>
             <tr><td>R</td><td>Reset car</td></tr><tr><td>Esc / P</td><td>Pause</td></tr>
             <tr><td>N / Left Shift</td><td>Nitro (hold)</td></tr>
+            <tr><td>T</td><td>Rewind (hold)</td></tr>
           </table>
           <h3>Xbox / PlayStation controller</h3>
-          <p>RT gas · LT brake · left stick steer · RB/LB shift · A nitro · Y camera · B handbrake · View reset · Menu pause.</p>
+          <p>RT gas · LT brake · left stick steer · RB/LB shift · A nitro · D-pad left rewind · Y camera · B handbrake · View reset · Menu pause.</p>
           <h3>Career</h3>
           <p>You start with the Rookie Coupe. Races pay prize money (more for better finishes, harder AI and more laps) plus bonuses for overtakes, drifts and the speed trap. Spend it in the <b>Garage</b> on new cars and upgrades. Nitrous is an upgrade: hold the NITRO button for a boost.</p>
         </div>
@@ -436,6 +440,11 @@ export class UI {
       case 'garage': this.show('garage'); break;
       case 'drag': this.show('drag'); break;
       case 'jobs': this.show('jobs'); break;
+      case 'achievements': this.show('achievements'); break;
+      case 'replay':
+        this.replayReturn = this.overlayName;
+        if (this.game.startReplay()) { this.closeOverlay(); this.mode = 'replay'; this.hudEl.classList.add('show'); } else this.toast('Nothing to replay yet.');
+        break;
       case 'story': this.stack = ['title', 'main']; this.show('story'); break;
       case 'storyGo': this._storyGo(); break;
       case 'storyNext': this._storyNext(); break;
@@ -473,6 +482,7 @@ export class UI {
         if (buyCar(this.career, car.id)) {
           this.S.carId = car.id;
           saveCareer(this.career);
+          checkGarage(this.career);
           saveSettings(this.S);
           this.audio.cash?.();
           this.toast(`You bought the ${car.name}!`);
@@ -481,6 +491,7 @@ export class UI {
         break;
       }
       case 'bindnitro': this._startBind('nitro'); break;
+      case 'bindrewind': this._startBind('rewind'); break;
       case 'resetcareer':
         if (this._confirmReset && performance.now() - this._confirmReset < 4000) {
           Object.assign(this.career, newCareer());
@@ -509,6 +520,7 @@ export class UI {
     if (lv >= 3) { this.toast(`${u.name} is already maxed.`); return; }
     if (buyUpgrade(this.career, car.id, upId)) {
       saveCareer(this.career);
+      checkGarage(this.career);
       this.toast(`${u.name}: ${u.levels[lv]} installed!`);
     } else this.toast(`Not enough money for ${u.name} (${fmtMoney(upgradeCost(car, upId, lv + 1))}).`);
     this._rerender();
@@ -541,6 +553,7 @@ export class UI {
     }
     saveCareer(C);
     saveSettings(this.S);
+    checkGarage(C);
     this._rerender();
   }
 
@@ -743,6 +756,7 @@ export class UI {
       <div class="menu-list row">
         ${r.story ? `<button class="btn primary big nav" data-act="storyNext" data-default="1">Continue story</button>${r.pink ? '' : '<button class="btn big nav" data-act="storyRetry">Try again</button>'}` : `<button class="btn primary big nav" data-act="again" data-default="1">Race again</button>
         <button class="btn big nav" data-act="results-garage">Garage</button>`}
+        <button class="btn big nav" data-act="replay">Watch replay</button>
         <button class="btn big nav" data-act="quit">${this.career.profile === 'story' ? 'Story hub' : 'Main menu'}</button>
       </div>`;
   }
@@ -783,6 +797,7 @@ export class UI {
       <div class="menu-list row">
         ${story ? `<button class="btn primary big nav" data-act="storyNext" data-default="1">Continue story</button>${!r.win && !r.pink ? '<button class="btn big nav" data-act="storyRetry">Try again</button>' : ''}` : `<button class="btn primary big nav" data-act="again" data-default="1">${r.pink ? 'Another pink slip race' : 'Run it back'}</button>
         <button class="btn big nav" data-act="dragSetup">Change opponent / bet</button>`}
+        <button class="btn big nav" data-act="replay">Watch replay</button>
         <button class="btn big nav" data-act="quit">${this.career.profile === 'story' ? 'Story hub' : 'Main menu'}</button>
       </div>`;
   }
@@ -881,6 +896,7 @@ export class UI {
     this.stack = ['title', 'main'];
     if (ev && eventPassed(ev, res, C)) {
       const out = completeEvent(C, ev);
+      if (out.finished) unlock('underdog', C);
       this.show('story', true);
       const lines = [...(ev.after || [])];
       if (out.reward) lines.push(['pops', `Story bonus: ${fmtMoney(out.reward)}. Don't blow it all at the strip.`]);
@@ -931,6 +947,19 @@ export class UI {
     next();
   }
 
+  _screen_achievements() {
+    const cards = ACHIEVEMENTS.map((a) => {
+      const ok = isUnlocked(a.id);
+      return `<div class="ach ${ok ? 'ok' : ''}"><span class="ai">${ok ? a.icon : '🔒'}</span><div><b>${esc(a.name)}</b><p>${esc(a.desc)}</p></div><em>${a.reward ? fmtMoney(a.reward) : ''}</em></div>`;
+    }).join('');
+    return `
+      <h1 class="title">Achievements</h1>
+      ${this._money()}
+      <p class="tag small">${unlockedCount()} of ${ACHIEVEMENTS.length} unlocked. Each one pays out into the save you're playing when it pops.</p>
+      <div class="achs">${cards}</div>
+      <button class="btn ghost nav" data-act="back" data-default="1" style="margin-top:16px">Back</button>`;
+  }
+
   _screen_jobs() {
     const C = this.career, S = this.S;
     if (!owns(C, S.carId)) S.carId = Object.keys(C.owned)[0];
@@ -972,6 +1001,7 @@ export class UI {
       <div class="earnings wide"><h4>${r.success ? 'Paid' : 'No pay'}</h4>${lines}${r.success ? `<div class="total"><span>Total</span><b>+${fmtMoney(r.pay)}</b></div>` : ''}<div class="bal"><span>Balance</span><b>${fmtMoney(r.balance)}</b></div></div>
       <div class="menu-list row">
         ${r.story ? `<button class="btn primary big nav" data-act="storyNext" data-default="1">Continue story</button>${r.success ? '' : '<button class="btn big nav" data-act="storyRetry">Try again</button>'}` : r.success ? '<button class="btn primary big nav" data-act="jobBoard" data-default="1">Job board</button>' : '<button class="btn primary big nav" data-act="jobRetry" data-default="1">Try again</button><button class="btn big nav" data-act="jobBoard">Job board</button>'}
+        <button class="btn big nav" data-act="replay">Watch replay</button>
         <button class="btn big nav" data-act="quit">${this.career.profile === 'story' ? 'Story hub' : 'Main menu'}</button>
       </div>`;
   }
@@ -1124,6 +1154,19 @@ export class UI {
       this._navigate(m);
       if (m.back) this.back();
       if (this.frameCount++ % 60 === 0) this._renderStatus();
+    } else if (this.mode === 'replay') {
+      const r = this.game.replay;
+      if (!r) return;
+      const st = this.input.state;
+      if (m.select) r.playing = !r.playing;
+      if (m.left) r.seek(-5);
+      if (m.right) r.seek(5);
+      if (m.up || m.down || st.pressed.camera) r.cycleCam();
+      if (m.back || st.pressed.pause) {
+        this.game.stopReplay();
+        this.mode = 'results';
+        this._showOverlay(this.replayReturn || 'results');
+      }
     } else if (this.mode === 'race') {
       if (this.input.state.pressed.pause) this.togglePause();
     } else if (this.mode === 'pause' || this.mode === 'results') {

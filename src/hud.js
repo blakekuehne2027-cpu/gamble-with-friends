@@ -75,11 +75,13 @@ export class HUD {
         </div>
       </div>
       <div class="hud-shift" id="h-shift">SHIFT</div>
+      <div class="hud-rewind" id="h-rewind">◀◀ REWIND</div>
+      <div class="hud-replay" id="h-replay"><b>● REPLAY</b><span id="h-rptime"></span><div class="rp-bar"><i id="h-rpfill"></i></div><span id="h-rpcam"></span><em>Gas/Enter play-pause · ◀ ▶ seek · Camera/▲▼ change cam · Brake/Esc exit</em></div>
       <div class="hud-job" id="h-job"><div class="jt"><b id="h-jobtitle"></b><span id="h-jobtimer"></span></div><div id="h-jobl1"></div><div id="h-jobl2"></div></div>
     `;
     const $ = (id) => root.querySelector('#' + id);
     this.el = {};
-    for (const id of ['pos', 'of', 'lap', 'laps', 'board', 'cur', 'last', 'best', 'delta', 'map', 'leds', 'rpmfill', 'rpmred', 'gear', 'speed', 'unit', 'abs', 'tc', 'clutch', 'trans', 'tele', 'wheel', 'pc', 'pb', 'pt', 'hp', 'knob', 'msg', 'sub', 'lights', 'nitro', 'nitrofill', 'mods', 'drift', 'cash', 'drag', 'dragname2', 'dragtime', 'dragyou', 'dragthem', 'shift', 'tree-you', 'tree-them', 'job', 'jobtitle', 'jobtimer', 'jobl1', 'jobl2']) {
+    for (const id of ['pos', 'of', 'lap', 'laps', 'board', 'cur', 'last', 'best', 'delta', 'map', 'leds', 'rpmfill', 'rpmred', 'gear', 'speed', 'unit', 'abs', 'tc', 'clutch', 'trans', 'tele', 'wheel', 'pc', 'pb', 'pt', 'hp', 'knob', 'msg', 'sub', 'lights', 'nitro', 'nitrofill', 'mods', 'drift', 'cash', 'drag', 'dragname2', 'dragtime', 'dragyou', 'dragthem', 'shift', 'tree-you', 'tree-them', 'job', 'jobtitle', 'jobtimer', 'jobl1', 'jobl2', 'rewind', 'replay', 'rptime', 'rpfill', 'rpcam']) {
       this.el[id] = $('h-' + id);
     }
     this.ledEls = [];
@@ -236,6 +238,23 @@ export class HUD {
       this.subTimer -= d.dt;
       if (this.subTimer <= 0) e.sub.classList.remove('show');
     }
+  }
+
+  setReplay(on) {
+    this.root.classList.toggle('replaying', on);
+  }
+
+  replayUpdate(r) {
+    const e = this.el;
+    const f = (t) => `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, '0')}`;
+    this._set('rptime', e.rptime, `${r.playing ? '▶' : '❚❚'} ${f(r.t)} / ${f(r.duration)}`);
+    e.rpfill.style.transform = `scaleX(${(r.t / Math.max(1, r.duration)).toFixed(4)})`;
+    this._set('rpcam', e.rpcam, r.camName);
+  }
+
+  setRewind(on) {
+    this.el.rewind.classList.toggle('show', on);
+    document.body.classList.toggle('rewinding', on);
   }
 
   jobUpdate({ title, timer, line1, line2, warn }) {

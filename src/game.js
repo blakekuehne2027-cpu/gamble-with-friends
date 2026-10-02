@@ -13,6 +13,8 @@ import { fmtTime } from './hud.js';
 import { buildSpec, raceReward, lapReward, saveCareer, modsActive } from './career.js';
 import { DragRace, LANE, settle } from './drag.js';
 import { JobRunner } from './jobs.js';
+import { unlock, checkRace, checkDrag, checkGarage } from './achievements.js';
+import { ReplayRecorder, ReplayPlayer } from './replay.js';
 
 const STEP = 1 / 240;
 const CAMERAS = ['cockpit', 'hood', 'chase', 'far'];
@@ -189,6 +191,10 @@ export class Game {
       this.scene.add(this.beacon);
     }
     this.lastImpact = 0;
+    this.history = [];
+    this.rewinding = false;
+    this.recorder = new ReplayRecorder();
+    this.replay = null;
 
     this.hud.setTrack(track);
     this.hud.setMode({ race, laps: cfg.laps, units: S.units, cars: n + 1, drag, job: !!this.job });
@@ -247,6 +253,11 @@ export class Game {
   update(dt) {
     if (!this.active) return;
     const inp = this.input.state;
+    if (this.replay) {
+      this.replay.update(Math.min(dt, 0.1));
+      this.hud.replayUpdate(this.replay);
+      return;
+    }
     if (this.paused) return;
     dt = Math.min(dt, 1 / 20);
     if (this.mods.slowmo) dt *= 0.5;
@@ -263,6 +274,18 @@ export class Game {
     }
     this.resetCooldown -= dt;
     if (inp.pressed.reset && this.resetCooldown <= 0) this.resetCar();
+
+    // Rewind: replay the last few seconds backwards instead of simulating.
+    if (inp.rewind && this._canRewind()) {
+      this._rewindStep(dt, inp);
+      return;
+    }
+    if (this.rewinding) {
+      this.rewinding = false;
+      this.hud.setRewind(false);
+      this.acc = 0;
+      this.skids.last.clear();
+    }
 
     this._updateStart(dt);
 
@@ -373,6 +396,95 @@ export class Game {
       this.onFinish?.(this.drag ? this._dragResults() : this.job ? this._jobResults() : this._results());
     }
     this.prevThrottle = throttle;
+    this._snapshot();
+    this.recorder.record(dt, this);
+  }
+
+  // ---------------------------------------------------------------- replay
+  _replayOthers() {
+    const out = this.ais.map((a) => ({ x: a.x, y: a.h + ROAD_Y, z: a.z, psi: a.psi, steer: a.steer, spin: a.wheelRot, braking: a.braking }));
+    if (this.drag) {
+      const r = this.drag.rival;
+      out.push({ x: r.x, y: this.dragRival.root.position.y, z: r.z, psi: r.psi, steer: r.delta, spin: r.wheelRot, braking: false });
+    }
+    return out;
+  }
+
+  _replayModels() {
+    const out = this.ais.map((a) => a.model);
+    if (this.dragRival) out.push(this.dragRival);
+    return out;
+  }
+
+  startReplay() {
+    if (this.recorder.frames.length < 30) return false;
+    this.replay = new ReplayPlayer(this, this.recorder.frames);
+    this.paused = false;
+    this.model.setCockpitVisible(false);
+    if (this.ghostModel) this.ghostModel.root.visible = false;
+    this.ffb.setForce(0);
+    this.hud.setReplay(true);
+    return true;
+  }
+
+  stopReplay() {
+    this.replay = null;
+    this.model.setCockpitVisible(CAMERAS[this.camIndex] === 'cockpit');
+    this.hud.setReplay(false);
+    this.paused = true;
+    this.audio.update({ paused: true });
+  }
+
+  // ---------------------------------------------------------------- rewind
+  _canRewind() {
+    if (this.drag || this.cfg.pink) return false; // nothing on the line gets a do-over
+    return (this.state === 'racing' || this.state === 'running') && this.history.length > 1;
+  }
+
+  _snapshot() {
+    if (!(this.state === 'racing' || this.state === 'running')) return;
+    const h = this.history;
+    h.push({
+      car: Object.assign({}, this.car),
+      ais: this.ais.map((a) => Object.assign({}, a)),
+      job: this.job ? Object.assign({}, this.job) : null,
+      g: {
+        time: this.time, prog: this.prog, lastS: this.lastS, hint: this.hint, lapsDone: this.lapsDone, lapStart: this.lapStart,
+        lastLap: this.lastLap, bestLap: this.bestLap, nitro: this.nitro, drift: { ...this.drift }, overtakes: this.overtakes,
+        bestPos: this.bestPos, topSpeed: this.topSpeed, carY: this.carY, trackPos: { ...this.trackPos }, steerCmd: this.steerCmd,
+        finishOrder: this.finishOrder.slice(), cachedPos: this._cachedPos, ghost: this.ghostRec ? [this.ghostRec.frames.length, this.ghostRec.marks.length] : null,
+      },
+    });
+    while (h.length > 2 && this.time - h[0].g.time > 10) h.shift();
+  }
+
+  _rewindStep(dt, inp) {
+    if (!this.rewinding) {
+      this.rewinding = true;
+      this.hud.setRewind(true);
+      unlock('do_over', this.career);
+    }
+    const h = this.history;
+    for (let k = 0; k < 2 && h.length > 1; k++) h.pop();
+    const snap = h[h.length - 1];
+    Object.assign(this.car, snap.car);
+    snap.ais.forEach((a, i) => Object.assign(this.ais[i], a));
+    if (snap.job && this.job) Object.assign(this.job, snap.job);
+    const g = snap.g;
+    this.time = g.time; this.prog = g.prog; this.lastS = g.lastS; this.hint = g.hint; this.lapsDone = g.lapsDone; this.lapStart = g.lapStart;
+    this.lastLap = g.lastLap; this.bestLap = g.bestLap; this.nitro = g.nitro; this.drift = { ...g.drift }; this.overtakes = g.overtakes;
+    this.bestPos = g.bestPos; this.topSpeed = g.topSpeed; this.carY = g.carY; this.trackPos = { ...g.trackPos }; this.steerCmd = g.steerCmd;
+    this.finishOrder = g.finishOrder.slice(); this._cachedPos = g.cachedPos;
+    if (g.ghost && this.ghostRec) { this.ghostRec.frames.length = g.ghost[0]; this.ghostRec.marks.length = g.ghost[1]; }
+    this.nitroOn = false;
+    this.recorder.truncate(this.time);
+    for (const ai of this.ais) ai._place();
+    // Draw the rewound state.
+    this._updateVisuals(dt, inp, this.car.delta / -this.spec.maxSteer);
+    this._updateCamera(dt, inp);
+    this.world.update(this._v.set(this.car.x, this.carY, this.car.z), this.camera);
+    this.audio.update({ rpm: this.car.rpm, throttle: 0.2, engineOn: true, speed: this.car.speed, slip: 0, onAsphalt: true, rain: this.rain });
+    this.particles.update(dt);
   }
 
   _updateStart(dt) {
@@ -436,12 +548,18 @@ export class Game {
   _jobResults() {
     const res = this.job.results(this.career);
     saveCareer(this.career);
+    if (res.success) {
+      if ((this.career.stats.jobs || 0) >= 10) unlock('jobs10', this.career);
+      if (res.job.type === 'taxi' && this.job.complaints === 0) unlock('smooth_op', this.career);
+    }
     return res;
   }
 
   _dragResults() {
     const res = this.drag.results(this.career, this.settings);
     saveCareer(this.career);
+    checkDrag(this.career, res);
+    checkGarage(this.career);
     if (res.win) {
       const lane = this.drag.you;
       this.world.setScoreboard('you', 'WINNER', lane.splits['1/4 mile'] ?? null, lane.speeds['1/4 mile'] ?? null, true);
@@ -454,6 +572,9 @@ export class Game {
     const car = this.car, dr = this.drift;
     if (this.state === 'countdown') return;
     this.topSpeed = Math.max(this.topSpeed, car.speed);
+    if (car.speed > 69.44) unlock('speed250', this.career);
+    if (car.speed > 111.1) unlock('speed400', this.career);
+    if (this.drift.total + this.drift.combo >= 5000) unlock('drift5k', this.career);
     // Drifting: rear sliding at speed on the tarmac.
     const angle = Math.abs(Math.atan2(car.v, Math.max(1, Math.abs(car.u))));
     const sliding = angle > 0.17 && car.speed > 12 && !this.onGrass && car.u > 0;
@@ -700,6 +821,7 @@ export class Game {
         this._finishGhostLap(lapTime, best);
         this.hud.message(fmtTime(lapTime), 3, best ? 'go' : '');
         if (best) this.hud.sub('NEW PERSONAL BEST!', 3);
+        if (best && hadBest) unlock('ghostbuster', this.career);
         const pay = lapReward({ trackKm: this.track.length / 1000, newBest: best, hadBest });
         this._pay(pay.total);
         this.hud.cash(`+$${pay.total.toLocaleString('en-US')}`);
@@ -787,6 +909,12 @@ export class Game {
     st.drift += this.drift.total;
     st.topSpeed = Math.max(st.topSpeed, topKmh);
     saveCareer(this.career);
+    const S = this.settings;
+    checkRace(this.career, { position: this.finishPosition }, {
+      overtakes: this.overtakes, difficulty: this.cfg.difficulty, opponents: this.ais.length, rain: this.rain, night: this.night,
+      manual: S.transmission === 'h' && this.input.shifterMapped() && !S.autoClutch && !!this.input.mapping?.clutch,
+    });
+    checkGarage(this.career);
     return {
       track: TRACKS[this.cfg.track].name,
       position: this.finishPosition,

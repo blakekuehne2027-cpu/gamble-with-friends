@@ -11,6 +11,7 @@ import { UI } from './ui.js';
 import { Showroom } from './showroom.js';
 import { findCar, PAINT_COLORS } from './cars.js';
 import { loadCareer, loadMods, carColorIndex } from './career.js';
+import { onUnlock } from './achievements.js';
 
 const settings = loadSettings();
 const career = loadCareer();
@@ -42,6 +43,13 @@ const showroom = new Showroom(renderer);
 const startCar = findCar(settings.carId);
 showroom.setCar(startCar, PAINT_COLORS[carColorIndex(career, startCar.id)], startCar.glow ?? (mods.underglow ? 0x22d3ee : null));
 const ui = new UI({ input, audio, ffb, settings, game, showroom, career, mods });
+
+// Achievement pop-ups.
+onUnlock((a) => {
+  ui.toast(`🏆 ${a.name}: ${a.desc}${a.reward ? ` (+$${a.reward.toLocaleString('en-US')})` : ''}`);
+  audio.cash();
+  if (game.active && ui.mode === 'race') hud.cash(`🏆 ${a.name}${a.reward ? ` +$${a.reward.toLocaleString('en-US')}` : ''}`);
+});
 
 // Browsers only allow audio after a click or key press.
 const unlock = () => audio.init();

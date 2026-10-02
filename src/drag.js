@@ -5,6 +5,7 @@ import { CarPhysics } from './physics.js';
 import { CARS, DEALER_CARS, findCar, PAINT_COLORS } from './cars.js';
 import { buildSpec, MOD_DEFAULTS, UPGRADES, upgradeCost, carColorIndex } from './career.js';
 import { QUARTER_MILE } from './track.js';
+import { checkPink } from './achievements.js';
 
 const STEP = 1 / 240;
 export const LANE = 4.5; // lane centre offset from the strip centreline
@@ -116,6 +117,7 @@ export function settle(career, settings, res) {
         career.owned[id] = { up: { ...res.opp.up }, color: ci >= 0 ? ci : 0 };
         lines.push([`PINK SLIP WON: the ${findCar(id).name} is yours`, 0]);
       }
+      checkPink(career, true, false);
     } else {
       const lost = res.carId;
       delete career.owned[lost];
@@ -125,6 +127,7 @@ export function settle(career, settings, res) {
         career.owned.junker = { up: {}, color: carColorIndex(career, 'junker') };
         settings.carId = 'junker';
         lines.push(['You have nothing left but a Rust Bucket. Time to work your way back up.', 0]);
+        checkPink(career, false, true);
       } else {
         settings.carId = left.map(findCar).sort((a, b) => b.tier - a.tier)[0].id;
       }
