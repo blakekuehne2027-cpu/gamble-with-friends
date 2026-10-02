@@ -1,7 +1,7 @@
 // Race session: player car, AI, laps, collisions, cameras, FFB, audio and HUD.
 
 import * as THREE from 'three';
-import { TRACKS, getTrack } from './track.js';
+import { TRACKS, getTrack, GroundCache, SANDBOX_SPOTS, smoothstep } from './track.js';
 import { findCar, PAINT_COLORS } from './cars.js';
 import { CarPhysics, SURFACES } from './physics.js';
 import { World, ROAD_Y } from './world.js';
@@ -16,6 +16,8 @@ import { JobRunner } from './jobs.js';
 import { unlock, checkRace, checkDrag, checkGarage } from './achievements.js';
 import { ReplayRecorder, ReplayPlayer } from './replay.js';
 import { CarDamage, Debris } from './damage.js';
+import { Chassis, Tumble } from './chassis.js';
+import { Props } from './props.js';
 
 const STEP = 1 / 240;
 const CAMERAS = ['cockpit', 'hood', 'chase', 'far'];
@@ -56,6 +58,14 @@ export class Game {
     const S = this.settings;
     const track = (this.track = getTrack(cfg.track));
     const def = TRACKS[cfg.track];
+    this.groundCache = track.groundCache || (track.groundCache = new GroundCache((x, z) => {
+      // The height of what's drawn: road ribbons near the track, terrain beyond.
+      const ti = track.terrainAt(x, z, this._gtmp || (this._gtmp = {}));
+      const wd = track.wallDist;
+      if (ti.d <= wd + 6) return ti.h + (ti.d <= track.halfWidth ? ROAD_Y : ROAD_Y - 0.04);
+      return ti.h - 0.45 * (1 - smoothstep(wd + 2, wd + 8, ti.d));
+    }));
+    this.sandbox = !!def.sandbox;
     this.world = new World(this.renderer, track, def.theme, S.graphics, { time: cfg.time, rain: cfg.rain });
     this.scene = this.world.scene;
     this.night = this.world.theme.night;
@@ -110,6 +120,7 @@ export class Game {
     const ps = race ? slot(n) : drag ? { s: -2.4, d: -LANE } : { s: -40, d: 0 };
     const p = track.pointAt(ps.s, ps.d);
     this.car.reset(p.x, p.z, p.heading);
+    this.free = cfg.mode === 'free';
     // Without a mapped shifter the H-pattern setting falls back to sequential, so start in 1st.
     this.car.gear = S.transmission === 'h' && this.input.shifterMapped() ? 0 : 1;
     this.prog = ps.s;
@@ -117,6 +128,20 @@ export class Game {
     this.hint = p.i;
     this.carY = p.h + ROAD_Y;
     this.trackPos = { s: this.lastS, d: ps.d, h: p.h, heading: p.heading, tx: p.tx, tz: p.tz };
+    // Suspension, airtime and rollovers.
+    this.chassis = new Chassis(spec);
+    this.chassis.reset(this.carY);
+    this.tumble = new Tumble(spec, this.model.style);
+    this.flipHint = 0;
+    this.envAir = { mu: 1, drag: 0, slope: 0, contactF: 0, contactR: 0 };
+    this._groundFn = (x, z, y) => this.groundAt(x, z, y);
+    this._wallFn = (x, z, y) => this._wallAt(x, z, y);
+    if (this.free && this.sandbox) this._spawnAt(SANDBOX_SPOTS[cfg.spot ?? 1]);
+    this.props = null;
+    if (this.sandbox) {
+      this.props = new Props(this.scene, this._groundFn, S.damage || 'full');
+      this.props.populate();
+    }
 
     // Session state.
     this.time = 0;
@@ -206,13 +231,14 @@ export class Game {
     this.replay = null;
 
     this.hud.setTrack(track);
-    this.hud.setMode({ race, laps: cfg.laps, units: S.units, cars: n + 1, drag, job: !!this.job });
+    this.hud.setMode({ race, laps: cfg.laps, units: S.units, cars: n + 1, drag, job: !!this.job, free: cfg.mode === 'free' });
     this.hud.setTelemetryVisible(S.showTelemetry);
     this.hud.setLights(0, false, race);
     this.hud.setNitro(spec.nitro > 0 ? 1 : -1);
     this.hud.setModsBadge(modsActive(this.mods));
     this.world.setStartLights(0);
     if (cfg.mode === 'tt') this.hud.message('TIME TRIAL', 2.5);
+    if (this.free) { this.hud.message('FREE ROAM', 2.5); this.hud.sub(this.sandbox ? 'Pause for teleports, repairs and props' : 'Drive anywhere, no timing', 4); }
     if (cfg.mode === 'job') this.hud.message(cfg.job.name.toUpperCase(), 2.5);
 
     this.audio.setPlayerCar(spec);
@@ -362,10 +388,22 @@ export class Game {
     this.acc = (this.acc || 0) + dt;
     let n = 0;
     while (this.acc >= STEP && n < 20) {
-      car.step(STEP, phys, env);
+      if (this.tumble.active) {
+        // Tumbling: the rigid body owns the motion; the car model only runs the engine.
+        car.step(STEP, phys, this.envAir);
+        this.tumble.step(STEP, this._groundFn, this._wallFn, this.damage.lost);
+      } else {
+        this.chassis.airControl = throttle - physBrake;
+        env.contactF = this.chassis.contactF;
+        env.contactR = this.chassis.contactR;
+        env.slope = this.chassis.groundSlope;
+        car.step(STEP, phys, env);
+        this.chassis.step(STEP, car, this._groundFn);
+      }
       this.acc -= STEP;
       n++;
     }
+    this._updateAirborne(dt);
     this.damage.update(dt, car);
     if (car.stalledEvent && !this.damage.dead) {
       car.stalledEvent = false;
@@ -377,6 +415,7 @@ export class Game {
 
     this._collideWalls();
     if (!this.mods.ghost) this._collideCars(dt);
+    if (this.props) this._updateProps(dt);
     this._damageFx(dt);
     this._progress(dt);
     this._scoring(dt);
@@ -470,6 +509,8 @@ export class Game {
       car: Object.assign({}, this.car),
       ais: this.ais.map((a) => Object.assign({}, a)),
       job: this.job ? Object.assign({}, this.job) : null,
+      ch: { y: this.chassis.y, vy: this.chassis.vy, pitch: this.chassis.pitch, wp: this.chassis.wp, roll: this.chassis.roll, wr: this.chassis.wr },
+      tu: this.tumble.active ? { X: this.tumble.X.clone(), q: this.tumble.q.clone(), V: this.tumble.V.clone(), W: this.tumble.W.clone() } : null,
       g: {
         time: this.time, prog: this.prog, lastS: this.lastS, hint: this.hint, lapsDone: this.lapsDone, lapStart: this.lapStart,
         lastLap: this.lastLap, bestLap: this.bestLap, nitro: this.nitro, drift: { ...this.drift }, overtakes: this.overtakes,
@@ -494,6 +535,10 @@ export class Game {
     Object.assign(this.car, snap.car);
     snap.ais.forEach((a, i) => Object.assign(this.ais[i], a));
     if (snap.job && this.job) Object.assign(this.job, snap.job);
+    Object.assign(this.chassis, snap.ch);
+    this.chassis.primed = false;
+    if (snap.tu) this.tumble.start(snap.tu.X, snap.tu.q, snap.tu.V, snap.tu.W);
+    else this.tumble.active = false;
     const g = snap.g;
     this.time = g.time; this.prog = g.prog; this.lastS = g.lastS; this.hint = g.hint; this.lapsDone = g.lapsDone; this.lapStart = g.lapStart;
     this.lastLap = g.lastLap; this.bestLap = g.bestLap; this.nitro = g.nitro; this.drift = { ...g.drift }; this.overtakes = g.overtakes;
@@ -655,12 +700,23 @@ export class Game {
   }
 
   resetCar() {
+    if (this.sandbox && this.free) {
+      // Put the car back on its wheels right where it is.
+      const c = this.car;
+      this._spawnAt({ x: c.x, z: c.z, heading: c.psi });
+      this.resetCooldown = 1.0;
+      this.hud.sub('CAR RESET', 1.2);
+      return;
+    }
     const t = this.track;
     const p = t.project(this.car.x, this.car.z, this.hint, this._proj);
     const q = t.pointAt(p.s, 0);
     const gear = this.car.gear;
     this.car.reset(q.x, q.z, q.heading);
     this.car.gear = this.settings.transmission === 'h' ? gear : 1;
+    this.tumble.active = false;
+    this.chassis.reset(this.groundAt(q.x, q.z));
+    this.flipHint = 0;
     this.resetCooldown = 1.0;
     this.skids.last.clear();
     this.hud.sub('CAR RESET', 1.2);
@@ -676,12 +732,13 @@ export class Game {
     for (const [lz, lx] of [[spec.a, half], [spec.a, -half], [-spec.b, half], [-spec.b, -half]]) {
       const x = car.x + sp * lz + cp * lx, z = car.z + cp * lz - sp * lx;
       const p = t.project(x, z, this.hint, this._proj);
-      const s = t.surfaceAt(p.d, p.i);
+      let s = t.surfaceAt(p.d, p.i, x, z);
+      if (this.sandbox && s === 'dirt' && t.featureTop(x, z, this.carY + 0.5) > -Infinity) s = 'asphalt';
       const sf = SURFACES[s];
       mu += sf.mu / 4;
       drag += sf.drag / 4;
       if (s === 'kerb') kerb = true;
-      if (s === 'grass') grass = true;
+      if (s === 'grass' || s === 'dirt') grass = true;
       this.wheelSurf[k++] = s;
     }
     const c = t.project(car.x, car.z, this.hint, this._proj);
@@ -691,6 +748,171 @@ export class Game {
     this.onGrass = grass;
     this.onKerb = kerb;
     return { mu: mu * this.wet, drag, slope, kerb, grass };
+  }
+
+  // ---------------------------------------------------------------- ground, air & rollovers
+  // Ground height under (x, z); ramps and blocks taller than refY + 0.45
+  // aren't ground (you hit their sides instead).
+  groundAt(x, z, refY = Infinity) {
+    const g = this.groundCache.at(x, z);
+    if (!this.sandbox) return g;
+    const f = this.track.featureTop(x, z, refY + 0.45);
+    return f > g ? f : g;
+  }
+
+  // Walls: the track barriers, or in the sandbox the map edge and the sides
+  // of ramps and blocks. Returns the way out { x, z, nx, nz } or null.
+  _spawnAt(sp) {
+    const car = this.car;
+    car.reset(sp.x, sp.z, sp.heading);
+    car.gear = this.settings.transmission === 'h' && this.input.shifterMapped() ? 0 : 1;
+    this.hint = this.track.project(sp.x, sp.z, -1, this._proj || (this._proj = {})).i;
+    this.chassis.reset(this.groundAt(sp.x, sp.z));
+    this.carY = this.chassis.y;
+    this.tumble.active = false;
+    this.camInit = false;
+    this.camPos?.set(0, 0, 0);
+    this.camYaw = sp.heading;
+    this.skids?.last.clear();
+  }
+
+  _updateProps(dt) {
+    const st = this.model.style;
+    this._propDims = this._propDims || { len: st.len, width: st.width, zOff: (this.spec.a - this.spec.b) / 2 };
+    this.props.update(dt, this.tumble.active ? { ...this.car, velocityAt: () => ({ x: 0, z: 0 }), applyImpulse() {}, spec: this.spec } : this.car, this.carY, this._propDims, (sev, x, z, nx, nz, sound, speed, pc) => {
+      if (sev > 1.5) this.damage.impact(x, this.carY + 0.4, z, nx, nz, sev);
+      if (sound === 'car' || sound === 'concrete') {
+        this.audio.hit(Math.min(1, speed / 14));
+        if (speed > 3) this.particles.sparks(x, this.carY + 0.4, z, this.car.u * Math.sin(this.car.psi), this.car.u * Math.cos(this.car.psi), Math.min(25, speed * 2) | 0);
+        this.shake = Math.max(this.shake, Math.min(0.9, speed / 12));
+        this.ffbJolt = Math.min(0.9, speed / 9) * (Math.random() < 0.5 ? -1 : 1);
+        if (pc && pc.damage.events.length) this._damageEvents(pc.damage, 0, 0, false);
+      } else {
+        this.audio.thunk(sound, Math.min(1, speed / 12));
+        this.ffbJolt = Math.max(this.ffbJolt, Math.min(0.35, speed / 30));
+      }
+    });
+    for (const e of this.props.events) {
+      if (e.type === 'bowl') {
+        if (e.down >= 10) { this.hud.message('STRIKE!', 3, 'go'); unlock('strike', this.career); this.audio.cash(); }
+        else this.hud.message(`${e.down} PIN${e.down === 1 ? '' : 'S'}`, 2.5);
+      }
+    }
+    this.props.events.length = 0;
+  }
+
+  resetProps() {
+    this.props?.reset();
+    this.debris.clear();
+    this.hud.sub('PROPS RESET', 1.5);
+  }
+
+  teleport(i) {
+    if (!this.sandbox) return;
+    this._spawnAt(SANDBOX_SPOTS[i]);
+    this.hud.sub(SANDBOX_SPOTS[i].name.toUpperCase(), 2);
+  }
+
+  _wallAt(x, z, y = this.carY) {
+    const t = this.track;
+    if (this.sandbox) {
+      const f = t.featureHit(x, z, y);
+      if (f) return f;
+      const b = t.bounds, m = 420;
+      const cx = Math.max(b.minX - m, Math.min(b.maxX + m, x)), cz = Math.max(b.minZ - m, Math.min(b.maxZ + m, z));
+      if (cx === x && cz === z) return null;
+      const dx = cx - x, dz = cz - z, l = Math.hypot(dx, dz) || 1;
+      return { x: cx, z: cz, nx: dx / l, nz: dz / l, pen: l };
+    }
+    const p = t.project(x, z, this.hint, this._wp || (this._wp = {}));
+    const lim = t.wallDist - 0.05;
+    if (Math.abs(p.d) <= lim) return null;
+    const over = p.d - Math.sign(p.d) * lim;
+    return { x: x - p.nx * over, z: z - p.nz * over, nx: -Math.sign(p.d) * p.nx, nz: -Math.sign(p.d) * p.nz, pen: Math.abs(over) };
+  }
+
+  _updateAirborne(dt) {
+    const c = this.chassis, car = this.car, T = this.tumble;
+    // Sliding sideways on dirt or grass: the tyres dig in and trip the car.
+    if (!T.active && this.onGrass && !c.airborne && Math.abs(car.v) > 8) {
+      c.wr -= Math.sign(car.v) * (Math.abs(car.v) - 7) * 1.6 * dt;
+    }
+    if (T.active) {
+      // Follow the rigid body.
+      const fwd = T.forward;
+      if (Math.abs(fwd.y) < 0.97) car.psi = Math.atan2(fwd.x, fwd.z);
+      const up = T.up;
+      const cg = this.spec.cgHeight;
+      car.x = T.X.x - up.x * cg; car.z = T.X.z - up.z * cg;
+      this.tumbleBaseY = T.X.y - up.y * cg;
+      const sp = Math.sin(car.psi), cp = Math.cos(car.psi);
+      car.u = T.V.x * sp + T.V.z * cp;
+      car.v = T.V.x * cp - T.V.z * sp;
+      car.r = T.W.y;
+      for (const h of T.hits) {
+        this.damage.impact(h.x, h.y, h.z, h.nx, h.nz, h.speed, h.ny);
+        if (h.speed > 4) {
+          this.particles.sparks(h.x, h.y, h.z, T.V.x, T.V.z, Math.min(20, h.speed * 2) | 0);
+          this.audio.hit(h.speed / 14);
+          this.shake = Math.max(this.shake, Math.min(1, h.speed / 10));
+          this.ffbJolt = Math.min(0.9, h.speed / 9) * (Math.random() < 0.5 ? -1 : 1);
+        } else if (h.speed > 2.5 && this.frame % 4 === 0) this.audio.scrape(0.5);
+      }
+      T.hits.length = 0;
+      if (T.up.y < -0.3) this.wasUpsideDown = true;
+      if (T.canDrive) {
+        // Landed back on its wheels: hand back to the normal car model.
+        if (this.wasUpsideDown) { this.hud.message('BARREL ROLL!', 2.5, 'go'); unlock('barrel_roll', this.career); }
+        const e = new THREE.Euler().setFromQuaternion(T.q, 'YXZ');
+        c.reset(this.tumbleBaseY);
+        c.pitch = e.x; c.roll = e.z; c.vy = T.V.y;
+        car.psi = e.y;
+        T.active = false;
+      } else if (T.rest > 1.2 && !this.flipHint) {
+        this.flipHint = 1;
+        this.hud.message(T.upsideDown ? 'ON THE ROOF' : 'ON ITS SIDE', 2.5, 'warn');
+        this.hud.sub('Press RESET (R) to flip back over', 6);
+      }
+      return;
+    }
+    // Hard landings bottom out the suspension.
+    if (c.landing > 6.5) {
+      const i = c.bottomWheel, w = c.wheels[i];
+      const sp = Math.sin(car.psi), cp = Math.cos(car.psi);
+      const x = car.x + sp * w.z + cp * w.x, z = car.z + cp * w.z - sp * w.x;
+      this.damage.impact(x, c.y + 0.25, z, 0, 0, c.landing * 0.9, 1);
+      this.particles.sparks(x, c.y + 0.05, z, car.u * sp, car.u * cp, Math.min(25, c.landing * 2) | 0);
+      this.audio.hit(c.landing / 12);
+      this.shake = Math.max(this.shake, Math.min(1, c.landing / 9));
+      this.ffbJolt = Math.min(1, c.landing / 8) * (w.x > 0 ? -1 : 1);
+    } else if (c.landing > 3.5) {
+      this.audio.hit(c.landing / 20);
+      this.ffbJolt = Math.min(0.5, c.landing / 12);
+    }
+    c.landing = 0;
+    // Big air bonus (time in the air, shown when you land).
+    if (c.airTime > 0) this.airMax = c.airTime;
+    else if (this.airMax > 0.6) {
+      this.hud.cash(`AIR ${this.airMax.toFixed(1)}s`);
+      if (this.airMax > 2.5) unlock('big_air', this.career);
+      this.airMax = 0;
+    } else this.airMax = 0;
+    if (c.tipped) this._startTumble();
+  }
+
+  _startTumble() {
+    const c = this.chassis, car = this.car, cg = this.spec.cgHeight;
+    const q = new THREE.Quaternion().setFromEuler(new THREE.Euler(c.pitch, car.psi, c.roll, 'YXZ'));
+    const X = new THREE.Vector3(0, cg, 0).applyQuaternion(q).add(new THREE.Vector3(car.x, c.y, car.z));
+    const sp = Math.sin(car.psi), cp = Math.cos(car.psi);
+    const V = new THREE.Vector3(car.u * sp + car.v * cp, c.vy, car.u * cp - car.v * sp);
+    const yawQ = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), car.psi);
+    const W = new THREE.Vector3(c.wp, 0, c.wr).applyQuaternion(yawQ);
+    W.y = car.r;
+    this.tumble.start(X, q, V, W);
+    this.tumbleBaseY = c.y;
+    this.flipHint = 0;
+    this.wasUpsideDown = false;
   }
 
   // ---------------------------------------------------------------- damage
@@ -704,6 +926,7 @@ export class Game {
 
   _damageFx(dt) {
     const car = this.car, dm = this.damage;
+    if (dm.lastSev > 34) { unlock('crash_test', this.career); dm.lastSev = 0; }
     const sp = Math.sin(car.psi), cp = Math.cos(car.psi);
     const vx = car.u * sp + car.v * cp, vz = car.u * cp - car.v * sp;
     if (dm.events.length) this._damageEvents(dm, vx, vz, true);
@@ -761,6 +984,7 @@ export class Game {
       if (e.type === 'overheat') this.hud.sub('ENGINE OVERHEATING', 3);
       if (e.type === 'engine') this.hud.sub('ENGINE DAMAGED', 2.5);
       if (e.type === 'dead') {
+        unlock('totaled', this.career);
         this.hud.message('ENGINE DESTROYED', 3, 'warn');
         if (this.cfg.mode === 'race' && !this.playerFinished) this.retireAt = this.time + 3;
         else this.hud.sub('Pause → Repair car', 5);
@@ -809,22 +1033,23 @@ export class Game {
     const sp = Math.sin(car.psi), cp = Math.cos(car.psi);
     const zOff = (this.spec.a - this.spec.b) / 2;
     const fz = s.len / 2 + zOff - 0.1, rz = -s.len / 2 + zOff + 0.1, hx = s.width / 2;
-    return [[fz, hx], [fz, -hx], [rz, hx], [rz, -hx], [zOff, hx], [zOff, -hx]].map(([lz, lx]) => [car.x + sp * lz + cp * lx, car.z + cp * lz - sp * lx]);
+    // [x, z, height of the bodywork's bottom at that corner]
+    const c = this.chassis, y0 = this.carY + 0.12;
+    const sP = c ? Math.sin(c.pitch) : 0, sR = c ? Math.sin(c.roll) : 0;
+    return [[fz, hx], [fz, -hx], [rz, hx], [rz, -hx], [zOff, hx], [zOff, -hx]].map(([lz, lx]) => [car.x + sp * lz + cp * lx, car.z + cp * lz - sp * lx, y0 - lz * sP + lx * sR]);
   }
 
   _collideWalls() {
     const t = this.track, car = this.car, m = this.spec.mass, I = this.spec.inertia;
-    const lim = t.wallDist - 0.05;
     let worst = 0;
     for (let iter = 0; iter < 2; iter++) {
-      for (const [x, z] of this._corners()) {
-        const p = t.project(x, z, this.hint, this._proj);
-        const ad = Math.abs(p.d);
-        if (ad <= lim) continue;
-        const pen = ad - lim;
-        const nx = -Math.sign(p.d) * p.nx, nz = -Math.sign(p.d) * p.nz; // inward normal
-        car.x += nx * pen;
-        car.z += nz * pen;
+      for (const [x, z, y] of this._corners()) {
+        const wl = this._wallAt(x, z, y);
+        if (!wl) continue;
+        const nx = wl.nx, nz = wl.nz; // inward normal
+        car.x += wl.x - x;
+        car.z += wl.z - z;
+        this.chassis.primed = false; // a push isn't the ground moving
         const v = car.velocityAt(x, z);
         const vn = v.x * nx + v.z * nz;
         if (vn < 0) {
@@ -832,6 +1057,13 @@ export class Game {
           const rn = rx * nz - rz * nx;
           const J = (-(1 + 0.25) * vn) / (1 / m + (rn * rn) / I);
           car.applyImpulse(nx * J, nz * J, x, z);
+          // The hit is below the centre of gravity, so it also rolls/pitches
+          // the body (hard enough and the car flips).
+          const c = this.chassis, sp = Math.sin(car.psi), cp = Math.cos(car.psi);
+          const arm = Math.max(0, this.spec.cgHeight - 0.35);
+          const nLat = nx * cp - nz * sp, nLong = nx * sp + nz * cp;
+          c.wr += (J * nLat * arm) / c.Ir * 0.9;
+          c.wp += (-J * nLong * arm) / c.Ip * 0.6;
           // Scrape friction.
           const tx = -nz, tz = nx;
           const vt = v.x * tx + v.z * tz;
@@ -877,6 +1109,7 @@ export class Game {
       const cx = best.px - nx * R, cz = best.pz - nz * R; // contact point
       car.x += nx * pen * 0.55;
       car.z += nz * pen * 0.55;
+      this.chassis.primed = false;
       const mAI = ai.spec.mass;
       const vp = car.velocityAt(cx, cz);
       const ty = this.track.pointAt(ai.s, 0, this._aiPt || (this._aiPt = {}));
@@ -922,7 +1155,7 @@ export class Game {
   }
 
   _progress() {
-    if (this.drag) return; // drag runs are timed by DragRace
+    if (this.drag || this.free) return; // drag runs are timed by DragRace; free roam isn't timed
     const t = this.track, L = t.length;
     const s = this.trackPos.s;
     let ds = s - this.lastS;
@@ -1084,16 +1317,21 @@ export class Game {
   // ---------------------------------------------------------------- visuals
   _updateVisuals(dt, inp, steer) {
     const car = this.car, spec = this.spec;
-    this.carY = this.trackPos.h + ROAD_Y + (this.onGrass ? -0.03 : 0);
-    const m = this.model;
-    m.root.position.set(car.x, this.carY, car.z);
-    // Whole car follows the road grade; the body adds dive/squat and roll.
-    const gradePitch = -Math.atan(this.track.grade[this.hint] * Math.cos(car.psi - this.trackPos.heading));
-    m.root.rotation.set(gradePitch, car.psi, 0, 'YXZ');
-    const tp = -car.ax * 0.0032;
-    const tr = car.ay * 0.0042;
-    this.vPitch = (this.vPitch || 0) + (tp - (this.vPitch || 0)) * Math.min(1, dt * 8);
-    this.vRoll = (this.vRoll || 0) + (tr - (this.vRoll || 0)) * Math.min(1, dt * 8);
+    const m = this.model, c = this.chassis;
+    if (this.tumble.active) {
+      this.carY = this.tumbleBaseY;
+      m.root.position.set(car.x, this.carY, car.z);
+      m.root.quaternion.copy(this.tumble.q);
+      m.setSuspension([-0.12, -0.12, -0.12, -0.12]);
+    } else {
+      // The chassis carries the car over the ground on its suspension.
+      this.carY = c.y;
+      m.root.position.set(car.x, c.y, car.z);
+      m.root.rotation.set(c.pitch, car.psi, c.roll, 'YXZ');
+      m.setSuspension(c.comp);
+    }
+    this.vPitch = 0;
+    this.vRoll = 0;
     const bump = this.onKerb ? (Math.random() - 0.5) * 0.012 : this.onGrass ? (Math.random() - 0.5) * 0.008 * Math.min(1, car.speed / 10) : 0;
     const wheelDeg = inp.wheel ? (inp.steerRaw * this.settings.wheelRange) / 2 : steer * spec.maxSteer * 180 / Math.PI * this.settings.steerRatio;
     this.wheelDeg = wheelDeg;

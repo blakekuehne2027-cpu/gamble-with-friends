@@ -174,8 +174,9 @@ export class HUD {
     }
   }
 
-  setMode({ race, laps, units, cars, drag = false, job = false }) {
+  setMode({ race, laps, units, cars, drag = false, job = false, free = false }) {
     this.root.classList.toggle('tt', !race);
+    this.root.classList.toggle('free', free);
     this.root.classList.toggle('drag', drag);
     this.root.classList.toggle('job', job);
     this._dragName = null;

@@ -26,6 +26,7 @@ export const SURFACES = {
   asphalt: { mu: 1.0, drag: 0, bump: 0 },
   kerb: { mu: 0.94, drag: 0.004, bump: 1 },
   grass: { mu: 0.58, drag: 0.09, bump: 0.6 },
+  dirt: { mu: 0.78, drag: 0.025, bump: 0.5 },
 };
 
 export class CarPhysics {
@@ -230,8 +231,9 @@ export class CarPhysics {
     let Nr = (m * G * s.a) / this.L + transfer + down * (1 - s.aeroFront);
     Nf = Math.max(Nf, m * G * 0.12);
     Nr = Math.max(Nr, m * G * 0.12);
-    const muF = s.mu * s.frontGrip * env.mu * dmg.gripF;
-    const muR = s.mu * s.rearGrip * env.mu * dmg.gripR;
+    // contactF/R: how much the axle's tyres are actually pressed on the ground (chassis.js).
+    const muF = s.mu * s.frontGrip * env.mu * dmg.gripF * (env.contactF ?? 1);
+    const muR = s.mu * s.rearGrip * env.mu * dmg.gripR * (env.contactR ?? 1);
 
     // --- Engine ---
     let throttle = clamp(inp.throttle, 0, 1);
@@ -319,7 +321,7 @@ export class CarPhysics {
     // Traction control: back off throttle while the rears spin, or when drive
     // force plus cornering would overload the rear tyres (power oversteer).
     const spinning = Math.abs(this.rearSpin) > 1.2 && this.rearSpin * u >= 0;
-    const longUse = (Fdrive * Math.sign(u || 1)) / (muR * Nr * 1.12);
+    const longUse = (Fdrive * Math.sign(u || 1)) / Math.max(1e-3, muR * Nr * 1.12);
     const latUse = Math.abs(tyreCurve(this.alphaR));
     const combined = longUse > 0.1 && absU > 4 ? Math.sqrt(longUse * longUse + latUse * latUse) : 0;
     // Smoothly trim torque instead of cutting it (a hard cut = lift-off oversteer).
@@ -376,7 +378,7 @@ export class CarPhysics {
     const vyW = -u * sd + vyF * cd;
     const alphaF = Math.atan2(vyW, Math.abs(vxW));
     let FxWf = -Math.sign(vxW) * Math.min(FbF, (this.mEffF * Math.abs(vxW)) / h);
-    const capF = muF * Nf;
+    const capF = Math.max(1e-3, muF * Nf);
     FxWf = clamp(FxWf, -capF, capF);
     let FyWf = -capF * tyreCurve(alphaF) * Math.sqrt(Math.max(0.04, 1 - (FxWf / capF) ** 2));
     if (this.frontLock) FyWf *= 0.35;
@@ -388,7 +390,7 @@ export class CarPhysics {
     // --- Rear tyre ---
     const vyR = v - s.b * r;
     const alphaR = Math.atan2(vyR, Math.abs(u));
-    const capR = muR * Nr;
+    const capR = Math.max(1e-3, muR * Nr);
     const capRx = capR * 1.12; // tyres grip a little better longitudinally
     let FxR = Fdrive - Math.sign(u) * Math.min(FbR, (this.mEffR * absU) / h);
     FxR = clamp(FxR, -capRx, capRx);
@@ -466,7 +468,7 @@ export class CarPhysics {
     this.Nf = Nf; this.Nr = Nr;
     const trail = 0.03 * Math.max(0, 1 - Math.abs(alphaF) / 0.22) + 0.012;
     this.steerTorque = FyWf * trail; // N·m, + pushes the wheel to the right
-    this.steerTorqueRef = muF * Nf * 0.03;
+    this.steerTorqueRef = Math.max(1, muF * Nf * 0.03);
     const latSlide = Math.max(0, Math.abs(alphaR) - 0.12) * absU + Math.max(0, Math.abs(alphaF) - 0.14) * absU * 0.6;
     this.slipAmount = latSlide + Math.abs(this.rearSpin) * 0.8 + ((this.frontLock || this.rearLock) ? absU * 0.5 : 0);
     this.wheelRot += (this.rearSpin + this.u) / s.wheelRadius * h;

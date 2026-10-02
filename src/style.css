@@ -406,3 +406,9 @@ body:has(.hud.replaying) .np { bottom: 120px; }
 @keyframes blink { 50% { opacity: 0.2; } }
 .hud.drag .hud-dmg, .hud.job .hud-dmg { bottom: 150px; }
 .earnings b.neg { color: #f87171; }
+
+/* ---------- free roam ---------- */
+.btn.free-btn { border-color: rgba(250, 204, 21, 0.55); }
+.tp-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+.tp-row .btn { padding: 8px 6px; font-size: 13px; }
+.hud.free .hud-tl, .hud.free .hud-tr { display: none; }

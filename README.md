@@ -6,6 +6,9 @@ A 3D racing game that runs in your browser, built for the **Logitech G29 / G920 
 - **Force feedback + rev lights** straight to the wheel (via WebHID). Steering weight comes from the front tyres: it gets heavier with load and downforce, goes light when you understeer, and pulls into opposite lock when the back steps out. On top of that: road texture, kerb rumble, grass, ABS chatter, locked wheels, wheelspin, gear-change kicks, the rev limiter, engine shake at idle, nitro, crashes and a soft lock at the car's steering limit. The G29's LED bar works as shift lights.
 - **Controller rumble** on Xbox / PlayStation controllers for the same effects.
 - **Cockpit view** with a steering wheel that turns 1:1 with yours, rev LEDs and a gear/speed display. Bonnet and chase cams too.
+- **BeamNG-style crashes**: cars crumple where they hit, and bumpers, the bonnet, doors, mirrors, wings, lights and even wheels break off and bounce down the road. Damage is mechanical too: engine power loss and misfires, a cracked radiator that overheats the engine, bent wheels that pull the steering, punctures, and engines that die in smoke and flames.
+- **Real suspension, jumps and rollovers**: each wheel rides on its own spring over the ground, so cars roll, dive, fly off crests and ramps (throttle/brake in the air tips the nose up/down), bottom out on hard landings, trip over when they slide sideways into the dirt, and tumble end over end.
+- **Free Roam on the Proving Grounds**: an open sandbox map with a stunt park (kickers, a mega ramp, a tabletop, a jump over parked cars, bowling), a 600 m runway with cones, a barrel wall and a crash-test wall, off-road hills and a ring road. Free Roam works on every circuit too.
 - **Story mode, UNDERDOG**: you're broke, driving a $500 rust bucket. Work jobs, race your way up, and bet your pink slip against the street kings, all the way to Viktor "King" Kane. Lose a pink-slip race and you lose the car. Lose your last one and you're back in the junker.
 - **3 circuits plus a dragstrip**: *Coastline GP* (ocean and mountains), *Pinewood Ring* (hilly forest), *Midnight Circuit* (city streets) and *Thunder Valley Dragway*.
 - **Weather and time of day**: race any track by day, at sunset or at night, dry or in the **rain** (less grip, spray, wet roads that shine under the lights).
@@ -102,6 +105,10 @@ Between events, earn money with **Jobs** and in the **Drag Race** betting lanes.
 
 In **Automatic**, hold the brake at a standstill to engage reverse.
 
+**Free Roam**: pick *Free Roam* on the main menu. In the Proving Grounds the pause menu has teleports (ring road, stunt park, runway, hills), *Repair car* and *Reset props*. RESET (R) puts a flipped car back on its wheels where it is.
+
+**Crash damage**: *Settings → Driving → Crash damage* sets *Off*, *Cosmetic* (dents and parts only) or *Realistic* (mechanical damage too; the default). In career races a wrecked engine means a DNF, and you pay a repair bill for the damage you bring home.
+
 **Replays**: pick *Watch replay* on any results screen. Gas/Enter plays or pauses, left/right seeks 5 seconds, the camera button or up/down changes the camera (auto TV → TV → chase → helicopter → bumper), and brake/Esc exits.
 
 **Radio**: choose the station and music volume in *Settings → Display & sound*, or press M / your radio button any time. *Skip song* generates a new one.
@@ -117,7 +124,7 @@ In **Automatic**, hold the brake at a standstill to engage reverse.
 
 ```bash
 npm install
-npm test            # physics, track, career and story checks (Node, no browser needed)
+npm test            # physics, track, career, story and suspension/rollover checks (Node, no browser needed)
 npm run build       # bundles src/ + three.js into the single-file index.html
 npx serve .         # then open http://localhost:3000/src/index.html for the unbundled dev version
 ```
@@ -134,6 +141,9 @@ Source layout (`src/`):
 | `jobs.js` | Jobs: courier, VIP taxi, test driver, drift show and radar run |
 | `achievements.js` | Achievement list, unlocks and rewards |
 | `replay.js` | Race recording and replay cameras |
+| `damage.js` | Crash damage: dents, parts breaking off, debris, mechanical damage |
+| `chassis.js` | Suspension, airtime, landings and the 3D tumbling body for rollovers |
+| `props.js` | Sandbox props (cones, barrels, crates, pins, barriers, parked cars) |
 | `radio.js` | Procedural music radio (sequencer, synths, drums, song generator) |
 | `track.js` | Track layouts, spline sampling, racing line, AI speed profiles, terrain height |
 | `world.js` | Builds the 3D scene: terrain, road, kerbs, walls, trees, grandstands, start lights, city, ocean, dragstrip, time-of-day lighting and rain |

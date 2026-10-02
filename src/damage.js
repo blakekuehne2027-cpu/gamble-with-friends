@@ -52,9 +52,9 @@ export class CarDamage {
     return this.mode === 'full';
   }
 
-  // An impact at world point (x, y, z). (nx, nz) is the direction the
+  // An impact at world point (x, y, z). (nx, ny, nz) is the direction the
   // bodywork gets pushed (into the car); speed is the closing speed in m/s.
-  impact(x, y, z, nx, nz, speed) {
+  impact(x, y, z, nx, nz, speed, ny = 0) {
     if (!this.enabled || speed < 1.8) return 0;
     const m = this.model;
     m.root.updateMatrixWorld(true);
@@ -62,8 +62,9 @@ export class CarDamage {
     m.body.worldToLocal(_P);
     // Direction into body space (rotation only).
     m.body.getWorldQuaternion(_q).invert();
-    _D.set(nx, 0, nz).applyQuaternion(_q).normalize();
+    _D.set(nx, ny, nz).applyQuaternion(_q).normalize();
     const sev = speed - 1.8; // severity in m/s above "a tap"
+    this.lastSev = Math.max(this.lastSev || 0, speed);
     const depth = Math.min(0.5, sev * 0.028);
     const radius = Math.min(1.5, 0.55 + sev * 0.035);
     m.crush(_P, _D, depth, radius);

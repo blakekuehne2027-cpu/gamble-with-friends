@@ -3,7 +3,7 @@
 // Fully navigable with the wheel (paddles = up/down, turn = change, gas =
 // select, brake = back), a gamepad, the keyboard or the mouse.
 
-import { TRACKS } from './track.js';
+import { TRACKS, SANDBOX_SPOTS } from './track.js';
 import { STATIONS } from './radio.js';
 import { DAMAGE_MODES, DAMAGE_NAMES } from './damage.js';
 import { CARS, PAINT_COLORS, findCar } from './cars.js';
@@ -134,6 +134,7 @@ export class UI {
       ${this._money()}
       <div class="menu-list">
         <button class="btn big nav story-btn" data-act="story" ${needsSetup ? '' : 'data-default="1"'}>Story: Underdog</button>
+        <button class="btn big nav free-btn" data-act="free">Free Roam</button>
         <button class="btn big nav" data-act="race">Race</button>
         <button class="btn big nav" data-act="tt">Time Trial</button>
         <button class="btn big nav" data-act="drag">Drag Race</button>
@@ -153,21 +154,30 @@ export class UI {
     return `<div class="opt nav" data-opt="${key}" ${extra}><label>${label}</label><div class="opt-val"><span class="arr" data-dir="-1">◀</span><b>${display}</b><span class="arr" data-dir="1">▶</span></div></div>`;
   }
 
+  _setupTrack() {
+    if (this.setupMode !== 'free') return this.S.track;
+    const i = this.S.freeTrack ?? TRACKS.findIndex((t) => t.sandbox);
+    return TRACKS[i] ? i : 0;
+  }
+
   _screen_setup() {
     const S = this.S;
     const race = this.setupMode === 'race';
-    const t = TRACKS[S.track], c = findCar(S.carId);
+    const free = this.setupMode === 'free';
+    const ti = this._setupTrack();
+    const t = TRACKS[ti], c = findCar(S.carId);
     const best = loadJSON(`redline.ghost.${t.id}.${c.id}`, null);
     const perf = perfStats(buildSpec(c, this.career.owned[c.id]?.up, this.mods));
     const prize = maxPrize({ opponents: S.opponents, laps: S.laps, difficulty: S.difficulty, trackKm: getTrack(S.track).length / 1000 });
     const ups = UPGRADES.reduce((n, u) => n + upgradeLevel(this.career, c.id, u.id), 0);
     const stat = (label, v) => `<div class="stat"><label>${label}</label><div><i style="width:${Math.round(v * 100)}%"></i></div></div>`;
     return `
-      <h1 class="title">${race ? 'Race' : 'Time Trial'}</h1>
+      <h1 class="title">${race ? 'Race' : free ? 'Free Roam' : 'Time Trial'}</h1>
       ${this._money()}
       <div class="setup">
         <div class="setup-opts">
-          ${this._optRow('track', 'Track', t.name)}
+          ${this._optRow(free ? 'freeTrack' : 'track', free ? 'Map' : 'Track', t.name)}
+          ${free && t.sandbox ? this._optRow('freeSpot', 'Start at', SANDBOX_SPOTS[S.freeSpot ?? 1].name) : ''}
           ${this._optRow('car', 'Car (owned)', c.name)}
           ${this._optRow('color', 'Paint', `<i class="swatch" style="background:${hexCss(PAINT_COLORS[carColorIndex(this.career, c.id)])}"></i>`)}
           ${race ? this._optRow('laps', 'Laps', S.laps) : ''}
@@ -176,8 +186,8 @@ export class UI {
           ${this._optRow('timeOfDay', 'Time of day', timeName(S.timeOfDay, t))}
           ${this._optRow('weather', 'Weather', S.weather === 'rain' ? '🌧 Rain' : '☀ Dry')}
           ${this._optRow('transmission', 'Transmission', transName(S.transmission))}
-          <p class="prize">${race ? `Win up to <b>${fmtMoney(prize)}</b> + overtake, drift &amp; speed-trap bonuses` : `Earn <b>${fmtMoney(Math.round(getTrack(S.track).length / 1000 * 110 / 10) * 10)}</b> per lap + <b>$1,200</b> for a new personal best`}</p>
-          <button class="btn primary big nav" data-act="go" data-default="1">${race ? 'Start Race' : 'Start Session'}</button>
+          <p class="prize">${free ? 'No timer, no rules: jumps, crashes, props and crash tests. Pause for repairs, teleports and resetting the props.' : race ? `Win up to <b>${fmtMoney(prize)}</b> + overtake, drift &amp; speed-trap bonuses` : `Earn <b>${fmtMoney(Math.round(getTrack(S.track).length / 1000 * 110 / 10) * 10)}</b> per lap + <b>$1,200</b> for a new personal best`}</p>
+          <button class="btn primary big nav" data-act="go" data-default="1">${race ? 'Start Race' : free ? 'Start Driving' : 'Start Session'}</button>
           <button class="btn nav" data-act="garage">Garage &amp; upgrades</button>
           <button class="btn ghost nav" data-act="back">Back</button>
         </div>
@@ -185,8 +195,8 @@ export class UI {
           <div class="card">
             <canvas id="trackmap" width="300" height="220"></canvas>
             <h3>${t.name}</h3><p>${t.blurb}</p>
-            <p class="dim">${(getTrack(S.track).length / 1000).toFixed(2)} km · ${timeName(S.timeOfDay, t)}${S.weather === 'rain' ? ' · wet track (less grip!)' : ''}</p>
-            ${!race ? `<p class="dim">Your best (${c.name}): <b>${best ? fmtTime(best.time) : 'none yet'}</b> ${best ? '· ghost car will race you' : ''}</p>` : ''}
+            <p class="dim">${(getTrack(ti).length / 1000).toFixed(2)} km${t.sandbox ? ' ring road' : ''} · ${timeName(S.timeOfDay, t)}${S.weather === 'rain' ? ' · wet track (less grip!)' : ''}</p>
+            ${!race && !free ? `<p class="dim">Your best (${c.name}): <b>${best ? fmtTime(best.time) : 'none yet'}</b> ${best ? '· ghost car will race you' : ''}</p>` : ''}
           </div>
           <div class="card">
             <h3>${c.name}</h3><p>${c.blurb}</p>
@@ -395,7 +405,7 @@ export class UI {
     }
     Array.from(root.querySelectorAll('.nav')).forEach((el, i) => el.addEventListener('mouseenter', () => this._setFocus(i)));
     const map = root.querySelector('#trackmap');
-    if (map) drawTrackPreview(map, getTrack(this.S.track));
+    if (map) drawTrackPreview(map, getTrack(this._setupTrack()));
   }
 
   _nav() {
@@ -431,6 +441,9 @@ export class UI {
       case 'start': this.show('main'); break;
       case 'race': this.setupMode = 'race'; this.show('setup'); break;
       case 'tt': this.setupMode = 'tt'; this.show('setup'); break;
+      case 'free': this.setupMode = 'free'; this.show('setup'); break;
+      case 'repairfree': this.game.repairCar(); this.togglePause(); break;
+      case 'resetprops': this.game.resetProps(); this.togglePause(); break;
       case 'settings': this.show('settings'); break;
       case 'help': this.show('help'); break;
       case 'wizard': this.openWizard(); break;
@@ -545,6 +558,7 @@ export class UI {
       default:
         if (a.startsWith('job:')) this._startJob(this._board[+a.slice(4)]);
         else if (a.startsWith('up:')) this._buyUpgrade(a.slice(3));
+        else if (a.startsWith('tp:')) { this.game.teleport(+a.slice(3)); this.togglePause(); }
         else if (a.startsWith('mod:')) this._modAction(a.slice(4));
     }
   }
@@ -633,8 +647,10 @@ export class UI {
     const cyc = (arr, v) => arr[(arr.indexOf(v) + dir + arr.length) % arr.length];
     const step = (v, lo, hi, st) => Math.round(Math.max(lo, Math.min(hi, v + dir * st)) / st) * st;
     switch (key) {
+      case 'freeTrack': S.freeTrack = (this._setupTrack() + dir + TRACKS.length) % TRACKS.length; break;
+      case 'freeSpot': S.freeSpot = ((S.freeSpot ?? 1) + dir + SANDBOX_SPOTS.length) % SANDBOX_SPOTS.length; break;
       case 'track': {
-        const circuits = TRACKS.map((t, i) => (t.drag ? -1 : i)).filter((i) => i >= 0);
+        const circuits = TRACKS.map((t, i) => (t.drag || t.sandbox ? -1 : i)).filter((i) => i >= 0);
         const i = Math.max(0, circuits.indexOf(S.track));
         S.track = circuits[(i + dir + circuits.length) % circuits.length];
         break;
@@ -736,7 +752,7 @@ export class UI {
     this.audio.init();
     if (!owns(this.career, S.carId)) S.carId = 'rookie';
     this.game.start({
-      mode: this.setupMode, track: S.track, carId: S.carId, color: carColorIndex(this.career, S.carId),
+      mode: this.setupMode, track: this._setupTrack(), spot: S.freeSpot ?? 1, carId: S.carId, color: carColorIndex(this.career, S.carId),
       laps: S.laps, opponents: S.opponents, difficulty: S.difficulty,
       time: S.timeOfDay, rain: S.weather === 'rain',
     });
@@ -769,6 +785,7 @@ export class UI {
         <button class="btn big nav" data-act="resume" data-default="1">Resume</button>
         <button class="btn big nav" data-act="restart">Restart</button>
         ${this.game.canRepair?.() && this.game.damage?.enabled ? '<button class="btn big nav" data-act="repair">Repair car</button>' : ''}
+        ${this.game.sandbox ? `<div class="tp-row">${SANDBOX_SPOTS.map((sp, i) => `<button class="btn nav" data-act="tp:${i}">${esc(sp.name)}</button>`).join('')}</div><button class="btn big nav" data-act="resetprops">Reset props</button>` : ''}
         <button class="btn big nav mod-btn" data-act="pausemods">Mod Menu${modsActive(this.mods) ? ' <small>ON</small>' : ''}</button>
         <button class="btn big nav" data-act="pauseradio">📻 ${this.S.radio < 0 ? 'Radio off' : STATIONS[this.S.radio].name}</button>
         <button class="btn big nav" data-act="quit">Quit to menu</button>

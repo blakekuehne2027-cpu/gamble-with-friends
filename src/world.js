@@ -25,6 +25,10 @@ export const SCENERY = {
     grass: [0x8a8a4a, 0xa39a5c], mow: 0x7f8a45, sand: 0xc9b07a, rock: 0x8a7a66,
     trees: 'round', treeCount: 500, water: false, mountains: 0xa0846c, lamps: true, defaultTime: 'sunset',
   },
+  sandbox: {
+    grass: [0x7d8a3c, 0x9a9452], mow: 0x6f8a3a, sand: 0xc9b07a, rock: 0x8f7d66,
+    trees: 'round', treeCount: 900, water: false, mountains: 0x9a8c7a, defaultTime: 'day',
+  },
 };
 
 // ... and lighting presets (time of day).
@@ -124,6 +128,19 @@ export function makeTextures() {
     g.fillRect(10, 0, 9, h);
     g.fillRect(w - 19, 0, 9, h);
   });
+  // Plain asphalt/concrete for open areas (no painted lines).
+  const pad = canvasTexture(512, 512, (g, w, h) => {
+    g.fillStyle = '#4c4e52';
+    g.fillRect(0, 0, w, h);
+    speckle(g, w, h, 26000, 74, 50, 0.9);
+    speckle(g, w, h, 4000, 112, 40, 0.5);
+    for (let i = 0; i < 6; i++) {
+      g.fillStyle = `rgba(0,0,0,${0.04 + Math.random() * 0.06})`;
+      g.beginPath();
+      g.ellipse(Math.random() * w, Math.random() * h, 40 + Math.random() * 90, 20 + Math.random() * 60, Math.random() * 3, 0, Math.PI * 2);
+      g.fill();
+    }
+  });
   const kerb = canvasTexture(64, 128, (g, w, h) => {
     g.fillStyle = '#d42020';
     g.fillRect(0, 0, w, h / 2);
@@ -170,7 +187,35 @@ export function makeTextures() {
       g.fillRect(Math.random() * w, Math.random() * h, 3, 4);
     }
   });
-  return { asphalt, kerb, grass, mow, wall, crowd };
+  return { asphalt, pad, kerb, grass, mow, wall, crowd };
+}
+
+function rampTexture() {
+  return canvasTexture(128, 128, (g) => {
+    g.fillStyle = '#c99a4a';
+    g.fillRect(0, 0, 128, 128);
+    for (let i = 0; i < 8; i++) {
+      g.fillStyle = i % 2 ? 'rgba(90,60,20,0.18)' : 'rgba(255,230,180,0.12)';
+      g.fillRect(0, i * 16, 128, 15);
+      g.fillStyle = 'rgba(60,40,15,0.5)';
+      g.fillRect(0, i * 16 + 15, 128, 1);
+    }
+    speckle(g, 128, 128, 300, 70, 40, 0.25);
+  });
+}
+
+function hazardTexture() {
+  return canvasTexture(128, 128, (g) => {
+    g.fillStyle = '#f2c200';
+    g.fillRect(0, 0, 128, 128);
+    g.fillStyle = '#151515';
+    for (let i = -128; i < 256; i += 32) {
+      g.beginPath();
+      g.moveTo(i, 0); g.lineTo(i + 16, 0); g.lineTo(i + 16 + 128, 128); g.lineTo(i + 128, 128);
+      g.closePath();
+      g.fill();
+    }
+  });
 }
 
 function sponsorTexture(text, bg, fg) {
@@ -256,11 +301,15 @@ export class World {
     this.sun.shadow.normalBias = 0.03;
     scene.add(this.sun, this.sun.target);
 
+    const sandbox = !!this.track.def.sandbox;
     this._buildTerrain();
     this._buildRoad();
-    this._buildWalls();
-    this._buildStart();
-    this._buildBrakeBoards();
+    if (!sandbox) {
+      this._buildWalls();
+      this._buildStart();
+      this._buildBrakeBoards();
+    }
+    if (this.track.features.length) this._buildFeatures();
     if (T.trees) this._buildTrees();
     if (T.water) this._buildWater();
     if (T.mountains) this._buildMountains();
@@ -850,6 +899,13 @@ export class World {
     const start = t.pointAt(0, 0);
     const pts = this._scatter(count, t.wallDist + 7, (x, z, info) => {
       if (T.water && info.h < 3) return false;
+      // Keep the stunt areas clear.
+      for (const f of t.def.flats || []) {
+        const ex = f.x1 - f.x0, ez = f.z1 - f.z0, l2 = ex * ex + ez * ez || 1;
+        const k = Math.max(0, Math.min(1, ((x - f.x0) * ex + (z - f.z0) * ez) / l2));
+        if (Math.hypot(x - f.x0 - ex * k, z - f.z0 - ez * k) < f.r + 25) return false;
+      }
+      for (const f of t.features) if (Math.hypot(x - f.x - f.s * f.len / 2, z - f.z - f.c * f.len / 2) < f.len / 2 + f.width / 2 + 12) return false;
       if (Math.hypot(x - start.x, z - start.z) < 170 && info.d < t.wallDist + 30) return false;
       // Clump trees using noise so the landscape has clearings.
       return fbm(x / 140, z / 140, 5) > (T.trees === 'pine' ? 0.36 : 0.45);
@@ -888,6 +944,61 @@ export class World {
       im.castShadow = true;
       im.receiveShadow = true;
       this.scene.add(im);
+    }
+  }
+
+  // Ramps, blocks and concrete pads for the sandbox.
+  _buildFeatures() {
+    const t = this.track;
+    const rampMat = new THREE.MeshStandardMaterial({ map: rampTexture(), roughness: 0.75 });
+    const blockMat = new THREE.MeshStandardMaterial({ map: hazardTexture(), roughness: 0.8 });
+    const padMat = new THREE.MeshStandardMaterial({ map: this.tex.pad, roughness: this.theme.rain ? 0.25 : 0.9, color: this.theme.rain ? 0x9a9a9a : 0xd8d8d8 });
+    const lineMat = new THREE.MeshStandardMaterial({ color: 0xf2f2f2, roughness: 0.6, polygonOffset: true, polygonOffsetFactor: -2 });
+    for (const f of t.features) {
+      let mesh;
+      if (f.type === 'pad') {
+        const g = new THREE.PlaneGeometry(f.len, f.width).rotateX(-Math.PI / 2);
+        const uv = g.attributes.uv;
+        for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) * f.len / 12, uv.getY(i) * f.width / 12);
+        g.translate(f.len / 2, 0, 0);
+        mesh = new THREE.Mesh(g, padMat);
+        mesh.position.set(f.x, f.base + 0.03, f.z);
+        // Painted edge lines (and a centre line on the runway).
+        const lines = [];
+        for (const w of f.width < 60 ? [-f.width / 2 + 1, 0, f.width / 2 - 1] : [-f.width / 2 + 1, f.width / 2 - 1]) {
+          const lg = new THREE.PlaneGeometry(f.len - 2, w === 0 ? 0.5 : 0.35).rotateX(-Math.PI / 2);
+          lg.translate(f.len / 2, 0.012, w);
+          lines.push(lg);
+        }
+        mesh.add(new THREE.Mesh(mergeGeometries(lines), lineMat));
+      } else if (f.type === 'block') {
+        const g = new THREE.BoxGeometry(f.len, f.height + 0.5, f.width);
+        g.translate(f.len / 2, (f.height + 0.5) / 2 - 0.5, 0);
+        mesh = new THREE.Mesh(g, blockMat);
+        mesh.position.set(f.x, f.base, f.z);
+      } else {
+        // Ramp-like: extrude the height profile across the width.
+        const sh = new THREE.Shape();
+        const n = 24;
+        sh.moveTo(0, -0.4);
+        for (let i = 0; i <= n; i++) {
+          const u = (i / n) * f.len;
+          sh.lineTo(u, t._profile(f, u) + 0.02);
+        }
+        sh.lineTo(f.len, -0.4);
+        sh.closePath();
+        const g = new THREE.ExtrudeGeometry(sh, { depth: f.width, bevelEnabled: false, curveSegments: 1 });
+        g.translate(0, 0, -f.width / 2);
+        // Planks run across the ramp.
+        const uv = g.attributes.uv;
+        for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) / 3, uv.getY(i) / 3);
+        mesh = new THREE.Mesh(g, rampMat);
+        mesh.position.set(f.x, f.base, f.z);
+      }
+      mesh.rotation.y = f.heading - Math.PI / 2;
+      mesh.castShadow = f.type !== 'pad';
+      mesh.receiveShadow = true;
+      this.scene.add(mesh);
     }
   }
 

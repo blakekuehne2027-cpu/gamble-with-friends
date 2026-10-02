@@ -7,7 +7,7 @@
   "scripts": {
     "build": "node build.mjs",
     "dev": "npx serve -l 5173 .",
-    "test": "node test/physics.test.mjs && node test/track.test.mjs && node test/career.test.mjs && node test/story.test.mjs"
+    "test": "node test/physics.test.mjs && node test/track.test.mjs && node test/career.test.mjs && node test/story.test.mjs && node test/chassis.test.mjs"
   },
   "dependencies": {
     "three": "0.170.0"

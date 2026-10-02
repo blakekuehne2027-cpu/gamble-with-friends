@@ -32,6 +32,11 @@ export const ACHIEVEMENTS = [
   { id: 'fully_built', icon: '🔧', name: 'Fully Built', desc: 'Max out every upgrade on one car.', reward: 2000 },
   { id: 'collector', icon: '🚗', name: 'Collector', desc: 'Own every dealership car at once.', reward: 10000 },
   { id: 'do_over', icon: '⏪', name: 'Do-Over', desc: 'Use rewind to fix a mistake.', reward: 100 },
+  { id: 'big_air', icon: '🛫', name: 'Frequent Flyer', desc: 'Stay in the air for 2.5 seconds in one jump.', reward: 1500 },
+  { id: 'barrel_roll', icon: '🌪', name: 'Barrel Roll', desc: 'Roll the car over and land back on its wheels.', reward: 1500 },
+  { id: 'strike', icon: '🎳', name: 'Strike!', desc: 'Knock down all ten pins in the Proving Grounds.', reward: 1000 },
+  { id: 'crash_test', icon: '💥', name: 'Crash Test Dummy', desc: 'Hit something at more than 130 km/h (80 mph).', reward: 1000 },
+  { id: 'totaled', icon: '🔥', name: 'Totaled', desc: 'Destroy an engine.', reward: 500 },
   { id: 'underdog', icon: '👑', name: 'Underdog', desc: 'Beat Viktor "King" Kane and finish the story.', reward: 25000 },
 ];
 const BY_ID = Object.fromEntries(ACHIEVEMENTS.map((a) => [a.id, a]));

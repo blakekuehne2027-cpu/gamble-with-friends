@@ -74,6 +74,66 @@ export const TRACKS = [
       [-606, 44, 0], [-500, 0, 0],
     ],
   },
+  {
+    id: 'sandbox',
+    name: 'Proving Grounds',
+    blurb: 'Free roam: ramps, a stunt park, a crash-test wall and hills. No rules.',
+    theme: 'sandbox',
+    sandbox: true,
+    width: 14,
+    wallDist: 16,
+    terrain: { base: 2, amp: 22, oceanSide: 0 },
+    flats: [
+      { x0: -250, z0: -80, x1: -250, z1: 170, r: 175, h: 2 },
+      { x0: -60, z0: -250, x1: 560, z1: -250, r: 40, h: 2 },
+    ],
+    points: [
+      [-500, -450, 2], [0, -460, 2], [500, -450, 2], [620, -350, 3], [640, 0, 6], [620, 350, 4],
+      [500, 450, 3], [0, 470, 2], [-500, 450, 2], [-620, 350, 2], [-640, 0, 3], [-620, -350, 2],
+    ],
+    features: sandboxFeatures(),
+  },
+];
+
+// ---------------------------------------------------------------- sandbox
+// Free-roam map: a ring road round an open landscape with a stunt park, a
+// runway with a crash-test wall, and hills. Features are placed by their
+// start edge (x, z), heading, length (along the heading) and width.
+function sandboxFeatures() {
+  const F = [];
+  const N = 0, E = Math.PI / 2;
+  // Stunt park (concrete pad).
+  F.push({ type: 'pad', x: -250, z: -110, heading: N, len: 330, width: 290, name: 'Stunt Park' });
+  // Kickers in a row with landing ramps.
+  F.push({ type: 'ramp', x: -360, z: -60, heading: N, len: 7, width: 6, height: 0.9 });
+  F.push({ type: 'ramp', x: -335, z: -60, heading: N, len: 11, width: 7, height: 2.1 });
+  F.push({ type: 'landing', x: -335, z: -10, heading: N, len: 18, width: 9, height: 2.4 });
+  F.push({ type: 'ramp', x: -305, z: -75, heading: N, len: 16, width: 8, height: 3.8 });
+  F.push({ type: 'landing', x: -305, z: 5, heading: N, len: 30, width: 12, height: 4.5 });
+  // Mega ramp.
+  F.push({ type: 'ramp', x: -250, z: -105, heading: N, len: 34, width: 10, height: 8.5 });
+  F.push({ type: 'landing', x: -250, z: 25, heading: N, len: 70, width: 18, height: 11 });
+  // Tabletop.
+  F.push({ type: 'table', x: -190, z: -60, heading: N, len: 50, width: 10, height: 3, ramp: 14 });
+  // Jump over the parked cars (they're props), then land.
+  F.push({ type: 'ramp', x: -140, z: -60, heading: N, len: 14, width: 7, height: 3 });
+  F.push({ type: 'landing', x: -140, z: 20, heading: N, len: 24, width: 10, height: 3 });
+  // Bowling lane.
+  F.push({ type: 'ramp', x: -380, z: 120, heading: N, len: 10, width: 6, height: 1.2 });
+  // Runway with a crash-test wall at the end.
+  F.push({ type: 'pad', x: -60, z: -250, heading: E, len: 620, width: 34, name: 'Runway' });
+  F.push({ type: 'block', x: 540, z: -250, heading: E, len: 3, width: 22, height: 3.2, name: 'Crash wall' });
+  // Off-road jumps in the hills.
+  F.push({ type: 'ramp', x: 260, z: 170, heading: -0.6, len: 12, width: 7, height: 2.5 });
+  F.push({ type: 'ramp', x: 150, z: 300, heading: 2.3, len: 12, width: 7, height: 2.8 });
+  return F;
+}
+
+export const SANDBOX_SPOTS = [
+  { name: 'Ring road', x: 0, z: -460, heading: Math.PI / 2 },
+  { name: 'Stunt park', x: -250, z: -190, heading: 0 },
+  { name: 'Runway', x: -40, z: -250, heading: Math.PI / 2 },
+  { name: 'Hills', x: 220, z: 120, heading: 0.4 },
 ];
 
 export const QUARTER_MILE = 402.34;
@@ -141,6 +201,71 @@ export class Track {
     this._buildSamples();
     this._buildGrid();
     this._buildRacingLine();
+    this.features = (def.features || []).map((f) => ({ ...f, s: Math.sin(f.heading), c: Math.cos(f.heading), base: this.heightAt(f.x, f.z), ramp: f.ramp || 0 }));
+  }
+
+  // Local coordinates of (x, z) in a feature: u along its heading, w across.
+  _local(f, x, z) {
+    const dx = x - f.x, dz = z - f.z;
+    return [dx * f.s + dz * f.c, dx * f.c - dz * f.s];
+  }
+
+  _profile(f, u) {
+    const H = f.height || 0;
+    if (f.type === 'pad') return 0.03;
+    if (f.type === 'block') return H;
+    if (f.type === 'ramp') return H * Math.pow(u / f.len, 1.35);
+    if (f.type === 'landing') return H * (1 - u / f.len);
+    if (f.type === 'table') {
+      if (u < f.ramp) return H * (u / f.ramp);
+      if (u > f.len - f.ramp) return H * ((f.len - u) / f.ramp);
+      return H;
+    }
+    return 0;
+  }
+
+  // Top of any ramp/block/pad at (x, z), or -Infinity. Features taller than
+  // maxY count as walls, not ground (see featureHit).
+  featureTop(x, z, maxY = Infinity) {
+    let top = -Infinity;
+    for (const f of this.features) {
+      const [u, w] = this._local(f, x, z);
+      if (u < 0 || u > f.len || Math.abs(w) > f.width / 2) continue;
+      const h = f.base + this._profile(f, u);
+      if (h > maxY) continue;
+      if (h > top) top = h;
+    }
+    return top;
+  }
+
+  onPad(x, z) {
+    for (const f of this.features) {
+      if (f.type !== 'pad') continue;
+      const [u, w] = this._local(f, x, z);
+      if (u >= 0 && u <= f.len && Math.abs(w) <= f.width / 2) return true;
+    }
+    return false;
+  }
+
+  // Point (x, y, z) inside the side of a feature that's too tall to drive
+  // onto: returns the shortest way out { x, z, nx, nz } or null.
+  featureHit(x, z, y) {
+    for (const f of this.features) {
+      if (f.type === 'pad') continue;
+      const [u, w] = this._local(f, x, z);
+      const hw = f.width / 2;
+      if (u < 0 || u > f.len || Math.abs(w) > hw) continue;
+      // Leave by the nearest face, but only if that face is a real wall: the
+      // low end of a ramp is driven onto, not hit.
+      const outs = [[hw - Math.abs(w), Math.sign(w) || 1, 0, this._profile(f, u)], [u, 0, -1, this._profile(f, 0)], [f.len - u, 0, 1, this._profile(f, f.len)]];
+      outs.sort((a, b) => a[0] - b[0]);
+      const [pen, sw, su, faceH] = outs[0];
+      if (f.base + Math.min(faceH, this._profile(f, u)) <= y + 0.45) continue;
+      // Local (u, w) direction -> world: u = (s, c), w = (c, -s).
+      const nx = su * f.s + sw * f.c, nz = su * f.c - sw * f.s;
+      return { x: x + nx * (pen + 0.02), z: z + nz * (pen + 0.02), nx, nz, pen };
+    }
+    return null;
   }
 
   _buildSamples() {
@@ -273,17 +398,16 @@ export class Track {
     // Refine on the two neighbouring segments.
     const prev = this.wrapIndex(best - 1);
     const next = this.wrapIndex(best + 1);
-    let i0 = best, i1 = next;
+    // Closest point on either neighbouring segment (picking by the nearest
+    // sample alone can flip segments mid-corner and make s / h jump).
     const segT = (a, b) => {
       const ex = this.x[b] - this.x[a], ez = this.z[b] - this.z[a];
-      return ((x - this.x[a]) * ex + (z - this.z[a]) * ez) / (ex * ex + ez * ez);
+      return Math.min(1, Math.max(0, ((x - this.x[a]) * ex + (z - this.z[a]) * ez) / (ex * ex + ez * ez)));
     };
-    let t = segT(best, next);
-    if (t < 0) {
-      i0 = prev; i1 = best;
-      t = segT(prev, best);
-    }
-    t = Math.min(1, Math.max(0, t));
+    const segD = (a, b, tt) => (x - this.x[a] - (this.x[b] - this.x[a]) * tt) ** 2 + (z - this.z[a] - (this.z[b] - this.z[a]) * tt) ** 2;
+    const tA = segT(prev, best), tB = segT(best, next);
+    let i0 = best, i1 = next, t = tB;
+    if (segD(prev, best, tA) < segD(best, next, tB)) { i0 = prev; i1 = best; t = tA; }
     const px = this.x[i0] + (this.x[i1] - this.x[i0]) * t;
     const pz = this.z[i0] + (this.z[i1] - this.z[i0]) * t;
     const tx = this.tx[i0] + (this.tx[i1] - this.tx[i0]) * t;
@@ -338,6 +462,14 @@ export class Track {
       const dist = T.oceanSide < 0 ? edge - z : z - edge;
       h -= smoothstep(-60, 260, dist) * (T.amp + 20);
     }
+    // Flattened areas (stunt park, runway).
+    for (const f of this.def.flats || []) {
+      const ex = f.x1 - f.x0, ez = f.z1 - f.z0;
+      const l2 = ex * ex + ez * ez || 1;
+      const t = Math.max(0, Math.min(1, ((x - f.x0) * ex + (z - f.z0) * ez) / l2));
+      const d = Math.hypot(x - f.x0 - ex * t, z - f.z0 - ez * t);
+      h += (f.h - h) * (1 - smoothstep(f.r, f.r + 70, d));
+    }
     return h;
   }
 
@@ -383,10 +515,11 @@ export class Track {
   }
 
   // Surface type for the given lateral offset.
-  surfaceAt(d, i) {
+  surfaceAt(d, i, x, z) {
     const ad = Math.abs(d);
     if (ad <= this.halfWidth) return 'asphalt';
     if (ad <= this.halfWidth + 1.4 && this.kerb[i]) return 'kerb';
+    if (this.def.sandbox) return x !== undefined && this.onPad(x, z) ? 'asphalt' : 'dirt';
     return 'grass';
   }
 
@@ -458,6 +591,44 @@ export class Track {
 const _tmpProj = {};
 
 const trackCache = new Map();
+// Smooth ground height for physics: samples heightAt() on a 2 m grid (built
+// in tiles as the car gets near) and interpolates bilinearly, so the height
+// under a wheel never jumps when the closest road segment changes.
+export class GroundCache {
+  constructor(fn, cell = 2) {
+    this.fn = fn;
+    this.cell = cell;
+    this.tiles = new Map();
+  }
+
+  _tile(tx, tz) {
+    const key = tx * 100003 + tz;
+    let t = this.tiles.get(key);
+    if (!t) {
+      t = new Float32Array(256);
+      for (let j = 0; j < 16; j++) {
+        for (let i = 0; i < 16; i++) t[j * 16 + i] = this.fn((tx * 16 + i) * this.cell, (tz * 16 + j) * this.cell);
+      }
+      this.tiles.set(key, t);
+    }
+    return t;
+  }
+
+  _sample(ix, iz) {
+    const tx = Math.floor(ix / 16), tz = Math.floor(iz / 16);
+    return this._tile(tx, tz)[(iz - tz * 16) * 16 + (ix - tx * 16)];
+  }
+
+  at(x, z) {
+    const gx = x / this.cell, gz = z / this.cell;
+    const ix = Math.floor(gx), iz = Math.floor(gz);
+    const fx = gx - ix, fz = gz - iz;
+    const a = this._sample(ix, iz), b = this._sample(ix + 1, iz);
+    const c = this._sample(ix, iz + 1), d = this._sample(ix + 1, iz + 1);
+    return (a + (b - a) * fx) * (1 - fz) + (c + (d - c) * fx) * fz;
+  }
+}
+
 export function getTrack(i) {
   if (!trackCache.has(i)) trackCache.set(i, new Track(TRACKS[i]));
   return trackCache.get(i);

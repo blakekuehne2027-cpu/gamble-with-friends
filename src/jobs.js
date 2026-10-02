@@ -26,7 +26,7 @@ export const JOB_TYPES = {
   radar: { name: 'Radar Run', icon: '📸', blurb: 'A magazine wants a speed-trap photo. Hit the target speed through the radar.' },
 };
 
-const CIRCUITS = TRACKS.map((t, i) => (t.drag ? -1 : i)).filter((i) => i >= 0);
+const CIRCUITS = TRACKS.map((t, i) => (t.drag || t.sandbox ? -1 : i)).filter((i) => i >= 0);
 
 // Lap time an expert would do in this car (from the AI speed profile).
 export function idealLap(track, spec) {

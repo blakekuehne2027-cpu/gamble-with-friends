@@ -270,6 +270,14 @@ export class AudioSystem {
     this._tone({ freq: 150 + Math.random() * 140, dur: 0.28, gain: 0.16 * s, type: 'square', slide: -90 });
   }
 
+  // Hitting a prop: plastic cone, metal barrel, wooden crate/pin.
+  thunk(kind, strength) {
+    const s = Math.min(1, strength) * 0.8 + 0.2;
+    if (kind === 'plastic') this._burst({ dur: 0.08, freq: 900, q: 2, gain: 0.3 * s });
+    else if (kind === 'metal') { this._tone({ freq: 220 + Math.random() * 80, dur: 0.35, gain: 0.18 * s, type: 'triangle', slide: -40 }); this._burst({ dur: 0.12, freq: 1400, q: 3, gain: 0.25 * s }); }
+    else { this._tone({ freq: 420 + Math.random() * 200, dur: 0.1, gain: 0.2 * s, type: 'square', slide: -150 }); this._burst({ dur: 0.07, freq: 2200, q: 2, gain: 0.2 * s }); }
+  }
+
   glass() {
     for (let i = 0; i < 6; i++) this._burst({ dur: 0.04 + Math.random() * 0.08, freq: 4200 + Math.random() * 4500, q: 9, gain: 0.16, delay: i * 0.02 + Math.random() * 0.03 });
   }

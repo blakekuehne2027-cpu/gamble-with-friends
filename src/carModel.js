@@ -586,12 +586,10 @@ export class CarModel {
     this.body.rotation.set(pitch, 0, roll, 'YXZ');
     for (const m of this.tailMats) if (!m.userData.broken) m.emissiveIntensity = braking ? 3.2 : lights ? 1.0 : 0.5;
     for (const m of this.headMats) if (!m.userData.broken) m.emissiveIntensity = lights ? 3 : 1.2;
-    if (this.camber) {
-      for (let i = 0; i < 4; i++) {
-        const w = this.wheels[i];
-        w.pivot.rotation.z = this.camber[i];
-        w.pivot.position.y = this.spec.wheelRadius - this.flat[i] * 0.075;
-      }
+    for (let i = 0; i < 4; i++) {
+      const w = this.wheels[i];
+      w.pivot.rotation.z = this.camber ? this.camber[i] : 0;
+      w.pivot.position.y = this.spec.wheelRadius + (this.susp ? this.susp[i] : 0) - (this.flat ? this.flat[i] * 0.075 : 0);
     }
     if (this.steeringWheel) this.steeringWheel.rotation.z = (wheelDeg * Math.PI) / 180;
   }
@@ -761,6 +759,11 @@ export class CarModel {
     part.obj.parent?.remove(part.obj);
     if (part.kind === 'light') { part.mat.userData.broken = true; part.mat.emissiveIntensity = 0; }
     return m;
+  }
+
+  // Suspension: per-wheel vertical offset from the rest position (m).
+  setSuspension(arr) {
+    this.susp = arr;
   }
 
   // Bent wheels (camber, radians) and flat tyres (0..1) for the visuals.
