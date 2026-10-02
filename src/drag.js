@@ -10,7 +10,7 @@ import { checkPink } from './achievements.js';
 const STEP = 1 / 240;
 export const LANE = 4.5; // lane centre offset from the strip centreline
 export const SPLITS = [['60 ft', 18.29], ['330 ft', 100.58], ['1/8 mile', 201.17], ['1000 ft', 304.8], ['1/4 mile', QUARTER_MILE]];
-export const BETS = [0, 500, 1000, 2500, 5000, 10000, 25000, 50000, 'all', 'pink'];
+export const BETS = [0, 500, 1000, 2500, 5000, 10000, 25000, 50000, 'custom', 'all', 'pink'];
 
 const clamp = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
 
@@ -93,8 +93,10 @@ export function oddsFor(playerEt, oppEt) {
   return Math.round(clamp(2 + (playerEt - oppEt) * 1.5, 1.15, 6) * 20) / 20;
 }
 
-export function betAmount(bet, money) {
+// custom: the amount the player typed in.
+export function betAmount(bet, money, custom = 0) {
   if (bet === 'all') return Math.max(0, Math.floor(money));
+  if (bet === 'custom') return Math.max(0, Math.floor(custom || 0));
   if (bet === 'pink') return 0;
   return bet;
 }

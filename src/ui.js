@@ -406,6 +406,17 @@ export class UI {
       el.addEventListener('click', () => this._change(el.dataset.opt, 1));
     }
     Array.from(root.querySelectorAll('.nav')).forEach((el, i) => el.addEventListener('mouseenter', () => this._setFocus(i)));
+    // Typed bet amount (drag racing).
+    const bi = root.querySelector('#bet-input');
+    if (bi) {
+      bi.addEventListener('keydown', (e) => {
+        e.stopPropagation();
+        if (e.key === 'Enter') bi.blur();
+        if (e.key === 'Escape') { bi.value = ''; bi.blur(); }
+      });
+      bi.addEventListener('input', () => { bi.value = bi.value.replace(/[^0-9]/g, ''); });
+      bi.addEventListener('change', () => this._setCustomBet(bi.value));
+    }
     const map = root.querySelector('#trackmap');
     if (map) drawTrackPreview(map, getTrack(this._setupTrack()));
   }
@@ -1105,9 +1116,9 @@ export class UI {
     }
     const opp = this.dragOpps[this.dragOppIdx || 0];
     const betOpt = BETS[this.dragBetIdx || 0];
-    const amount = betAmount(betOpt, C.money);
+    const amount = betAmount(betOpt, C.money, this.customBet);
     const pink = betOpt === 'pink';
-    const betLabel = pink ? '<span class="pink">PINK SLIPS</span>' : betOpt === 'all' ? `ALL IN (${fmtMoney(amount)})` : amount ? fmtMoney(amount) : 'No bet';
+    const betLabel = pink ? '<span class="pink">PINK SLIPS</span>' : betOpt === 'all' ? `ALL IN (${fmtMoney(amount)})` : betOpt === 'custom' ? (amount ? `YOUR BET (${fmtMoney(amount)})` : 'YOUR BET (type it below)') : amount ? fmtMoney(amount) : 'No bet';
     const oppCar = findCar(opp.carId);
     const lvl = opp.up.engine || 0;
     return `
@@ -1118,6 +1129,7 @@ export class UI {
           ${this._optRow('car', 'Your car', car.name)}
           ${this._optRow('dragOpp', 'Opponent', `${opp.name} <small class="tier tier-${opp.label}">${opp.label}</small>`)}
           ${this._optRow('dragBet', 'Bet', betLabel)}
+          ${pink ? '' : `<div class="bet-type"><label for="bet-input">Or type a bet</label><div class="bet-in"><span>$</span><input id="bet-input" type="text" inputmode="numeric" autocomplete="off" maxlength="9" value="${betOpt === 'custom' && this.customBet ? this.customBet : ''}" placeholder="0 to ${fmtMoney(C.money).replace('$', '')}"></div><small>Press Enter</small></div>`}
           ${this._optRow('timeOfDay', 'Time of day', timeName(S.timeOfDay, TRACKS[dragTrackIndex(TRACKS)]))}
           ${this._optRow('weather', 'Weather', S.weather === 'rain' ? '🌧 Rain' : '☀ Dry')}
           ${this._optRow('transmission', 'Transmission', transName(S.transmission))}
@@ -1142,6 +1154,18 @@ export class UI {
       </div>`;
   }
 
+  _setCustomBet(text) {
+    const money = Math.max(0, Math.floor(this.career.money));
+    let n = parseInt(String(text).replace(/[^0-9]/g, ''), 10) || 0;
+    if (n > money) {
+      n = money;
+      this.toast(`You only have ${fmtMoney(money)}, so that's your bet.`);
+    }
+    this.customBet = n;
+    this.dragBetIdx = n > 0 ? BETS.indexOf('custom') : 0;
+    this._rerender();
+  }
+
   _startDrag(again = false) {
     const S = this.S, C = this.career;
     if (!owns(C, S.carId)) {
@@ -1154,7 +1178,8 @@ export class UI {
     if (!opp) { this.show('drag'); return; }
     let betOpt = BETS[this.dragBetIdx || 0];
     const pink = betOpt === 'pink';
-    let bet = betAmount(betOpt, C.money);
+    let bet = betAmount(betOpt, C.money, this.customBet);
+    if (betOpt === 'custom' && bet >= C.money && bet > 0) betOpt = 'all'; // betting everything: confirm like all in
     if (bet > C.money) {
       this.dragBetIdx = 0;
       bet = 0;

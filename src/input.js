@@ -46,6 +46,8 @@ export class Input {
 
     window.addEventListener('keydown', (e) => {
       if (e.repeat) return;
+      // Typing in a text box (e.g. a bet amount) isn't driving or menu input.
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
       this.keys.add(e.code);
       this.tapped.add(e.code);
       this.lastSource = 'keys';
