@@ -4,6 +4,7 @@
 // select, brake = back), a gamepad, the keyboard or the mouse.
 
 import { TRACKS } from './track.js';
+import { STATIONS } from './radio.js';
 import { CARS, PAINT_COLORS, findCar } from './cars.js';
 import { saveSettings, loadJSON } from './settings.js';
 import { getTrack } from './game.js';
@@ -23,7 +24,8 @@ const hexCss = (h) => '#' + h.toString(16).padStart(6, '0');
 const DIFF = ['Easy', 'Medium', 'Hard', 'Pro'];
 
 export class UI {
-  constructor({ input, audio, ffb, settings, game, showroom, career, mods }) {
+  constructor({ input, audio, ffb, settings, game, showroom, career, mods, radio }) {
+    this.radio = radio;
     this.career = career;
     this.mods = mods;
     this.input = input;
@@ -305,6 +307,7 @@ export class UI {
           <button class="btn nav" data-act="wizard">Run wheel setup again</button>
           <button class="btn nav" data-act="bindnitro">Set NITRO button on wheel${this.input.mapping?.buttons?.nitro ? ` (now: button ${this.input.mapping.buttons.nitro.button})` : ''}</button>
           <button class="btn nav" data-act="bindrewind">Set REWIND button on wheel${this.input.mapping?.buttons?.rewind ? ` (now: button ${this.input.mapping.buttons.rewind.button})` : ''}</button>
+          <button class="btn nav" data-act="bindradio">Set RADIO button on wheel${this.input.mapping?.buttons?.radio ? ` (now: button ${this.input.mapping.buttons.radio.button})` : ''}</button>
           <h4>Career</h4>
           <button class="btn ghost nav" data-act="resetcareer">Reset career (money, cars, upgrades)</button>
         </div>
@@ -324,6 +327,9 @@ export class UI {
           ${this._optRow('showTelemetry', 'Pedal / wheel overlay', onoff(S.showTelemetry))}
           ${this._optRow('graphics', 'Graphics', S.graphics === 'high' ? 'High' : 'Low')}
           ${this._optRow('volume', 'Volume', pct(S.volume))}
+          ${this._optRow('radio', 'Radio station', S.radio < 0 ? 'Off' : `${STATIONS[S.radio].name} (${STATIONS[S.radio].genre})`)}
+          ${this._optRow('musicVolume', 'Music volume', pct(S.musicVolume))}
+          <button class="btn nav" data-act="radioskip">Skip song</button>
           <button class="btn ghost nav" data-act="back">Back</button>
         </div>
       </div>`;
@@ -355,9 +361,10 @@ export class UI {
             <tr><td>R</td><td>Reset car</td></tr><tr><td>Esc / P</td><td>Pause</td></tr>
             <tr><td>N / Left Shift</td><td>Nitro (hold)</td></tr>
             <tr><td>T</td><td>Rewind (hold)</td></tr>
+            <tr><td>M</td><td>Radio: next station / off</td></tr>
           </table>
           <h3>Xbox / PlayStation controller</h3>
-          <p>RT gas · LT brake · left stick steer · RB/LB shift · A nitro · D-pad left rewind · Y camera · B handbrake · View reset · Menu pause.</p>
+          <p>RT gas · LT brake · left stick steer · RB/LB shift · A nitro · D-pad left rewind · right stick click radio · Y camera · B handbrake · View reset · Menu pause.</p>
           <h3>Career</h3>
           <p>You start with the Rookie Coupe. Races pay prize money (more for better finishes, harder AI and more laps) plus bonuses for overtakes, drifts and the speed trap. Spend it in the <b>Garage</b> on new cars and upgrades. Nitrous is an upgrade: hold the NITRO button for a boost.</p>
         </div>
@@ -492,6 +499,14 @@ export class UI {
       }
       case 'bindnitro': this._startBind('nitro'); break;
       case 'bindrewind': this._startBind('rewind'); break;
+      case 'bindradio': this._startBind('radio'); break;
+      case 'pauseradio':
+        this.S.radio = this.radio.next();
+        saveSettings(this.S);
+        this._showOverlay('pause');
+        this._setFocus(this._nav().findIndex((e) => e.dataset.act === 'pauseradio'));
+        break;
+      case 'radioskip': this.audio.init(); this.radio.skip(); break;
       case 'resetcareer':
         if (this._confirmReset && performance.now() - this._confirmReset < 4000) {
           Object.assign(this.career, newCareer());
@@ -646,6 +661,8 @@ export class UI {
       case 'steerRatio': S.steerRatio = step(S.steerRatio, 6, 20, 1); break;
       case 'ffbStrength': S.ffbStrength = +step(S.ffbStrength, 0, 1, 0.05).toFixed(2); break;
       case 'volume': S.volume = +step(S.volume, 0, 1, 0.1).toFixed(1); this.audio.setVolume(S.volume); break;
+      case 'radio': S.radio = ((S.radio + 1 + dir + STATIONS.length + 1) % (STATIONS.length + 1)) - 1; this.radio.setStation(S.radio); break;
+      case 'musicVolume': S.musicVolume = +step(S.musicVolume, 0, 1, 0.1).toFixed(1); this.radio.setVolume(S.musicVolume); break;
       case 'fov': S.fov = step(S.fov, 40, 100, 2); break;
       case 'units': S.units = S.units === 'mph' ? 'kmh' : 'mph'; break;
       case 'camera': S.camera = cyc(['cockpit', 'hood', 'chase', 'far'], S.camera); break;
@@ -727,6 +744,7 @@ export class UI {
         <button class="btn big nav" data-act="resume" data-default="1">Resume</button>
         <button class="btn big nav" data-act="restart">Restart</button>
         <button class="btn big nav mod-btn" data-act="pausemods">Mod Menu${modsActive(this.mods) ? ' <small>ON</small>' : ''}</button>
+        <button class="btn big nav" data-act="pauseradio">📻 ${this.S.radio < 0 ? 'Radio off' : STATIONS[this.S.radio].name}</button>
         <button class="btn big nav" data-act="quit">Quit to menu</button>
       </div>
       <p class="hint">Quitting a race early pays nothing. Settings like FFB strength are in the main menu.</p>`;

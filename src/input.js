@@ -21,10 +21,11 @@ const KEYS = {
   reset: ['KeyR'],
   nitro: ['KeyN', 'ShiftLeft'],
   rewind: ['KeyT'],
+  radio: ['KeyM'],
   pause: ['Escape', 'KeyP'],
 };
 
-export const ACTIONS = ['shiftUp', 'shiftDown', 'camera', 'pause', 'reset', 'lookBack', 'handbrake', 'nitro', 'rewind'];
+export const ACTIONS = ['shiftUp', 'shiftDown', 'camera', 'pause', 'reset', 'lookBack', 'handbrake', 'nitro', 'rewind', 'radio'];
 export const GEAR_KEYS = ['1', '2', '3', '4', '5', '6', 'R'];
 
 const clamp01 = (v) => (v < 0 ? 0 : v > 1 ? 1 : v);
@@ -209,6 +210,7 @@ export class Input {
       if (b(1)) down.handbrake = true;
       if (b(0)) down.nitro = true;
       if (b(14)) down.rewind = true;
+      if (b(11)) down.radio = true; // right stick click
       if (b(8)) down.reset = true;
       if (b(9)) down.pause = true;
       padMenu.up = b(12) || (pad.axes[1] || 0) < -0.6;

@@ -5,13 +5,21 @@ A 3D racing game that runs in your browser, built for the **Logitech G29 / G920 
 - **Real H-pattern shifting**: shifter in gear = in gear, middle = neutral. Optional manual clutch: grind the gears if you don't clutch, stall if you dump it at idle.
 - **Force feedback + rev lights** straight to the wheel (via WebHID): tyre self-aligning torque that goes light when you understeer, kerb rumble, grass, impacts and a soft lock at the car's steering limit. The G29's LED bar works as shift lights.
 - **Cockpit view** with a steering wheel that turns 1:1 with yours, rev LEDs and a gear/speed display. Bonnet and chase cams too.
-- **3 tracks**: *Coastline GP* (midday, ocean and mountains), *Pinewood Ring* (hilly forest at golden hour), *Midnight Circuit* (night street circuit).
+- **Story mode, UNDERDOG**: you're broke, driving a $500 rust bucket. Work jobs, race your way up, and bet your pink slip against the street kings, all the way to Viktor "King" Kane. Lose a pink-slip race and you lose the car. Lose your last one and you're back in the junker.
+- **3 circuits plus a dragstrip**: *Coastline GP* (ocean and mountains), *Pinewood Ring* (hilly forest), *Midnight Circuit* (city streets) and *Thunder Valley Dragway*.
+- **Weather and time of day**: race any track by day, at sunset or at night, dry or in the **rain** (less grip, spray, wet roads that shine under the lights).
+- **Drag racing**: quarter-mile runs with a real Christmas tree, reaction times, shift grading and a time slip. **Bet** cash on the run, from $500 up to everything you have, or bet your **pink slip** and the winner keeps both cars.
+- **Jobs**: earn money between races as a parts courier (don't wreck the cargo), VIP taxi driver (smooth driving only), test driver, drift show performer or speed-camera runner.
+- **Rewind**: hold the REWIND button to roll back the last 10 seconds and fix a mistake.
+- **Replays**: watch any race, drag run or job back with auto-cut TV trackside cameras, chase, helicopter and bumper cams.
+- **Radio**: three stations of music generated on the fly, so no two songs are the same: *REDLINE FM* (synthwave), *NITRO 140* (darksynth) and *NIGHT DRIVE 88* (chillwave).
+- **25 achievements**, each paying cash.
 - **Career**: start in the *Rookie Coupe* with $5,000, win prize money and buy your way up to the *Phantom LMP*. Every car has 6 upgrades (engine, weight, tyres, brakes, aero, nitrous) with 3 levels each.
 - **Bonuses** paid on top of prize money: overtakes, drift combos, the speed trap and the fastest lap.
 - **Nitrous**: buy it as an upgrade, hold the NITRO button for a boost (blue exhaust flames included).
 - **Mod Menu**: grab the 1,800 hp **HYPERNOVA X**, free money, unlock everything, max upgrades, power multiplier, super grip, drift mode, infinite nitro, ghost mode, slow motion, AI speed, rainbow paint and neon underglow. Works mid-race from the pause menu.
 - **Race** up to 9 AI drivers, or **Time Trial** against a ghost of your best lap.
-- Engine, tyre and backfire sounds are synthesised live. No downloads needed.
+- Engine, tyre and backfire sounds and all the music are synthesised live. No downloads needed.
 
 ## Play it
 
@@ -33,11 +41,23 @@ A 3D racing game that runs in your browser, built for the **Logitech G29 / G920 
 
 Once set up you can drive the menus with the wheel: **paddles** move up/down, **turning** changes an option, **gas** selects, **brake** goes back.
 
+### Story mode: UNDERDOG
+
+Story mode has its own save, separate from free play. You start with $500 and the *Rust Bucket*. Four chapters, each with three events:
+
+1. **Rock Bottom**: deliver parts, drive a night taxi shift, then make the podium against Tank.
+2. **The Strip**: beat Tank on the dragstrip, buy a real car, then win your first pink slip.
+3. **Climbing**: podium at Pinewood, pass a test-driver job, then take on Lola one-on-one.
+4. **Pink Slips**: get a class-3 car, beat Dutch for his Titan's pink slip, then race Kane for his Phantom at Midnight Circuit, at night, in the rain.
+
+Between events, earn money with **Jobs** and in the **Drag Race** betting lanes. Your money and cars from story mode stay in story mode.
+
 ### Career, garage and mods
 
 | Car | Price | Class |
 |---|---|---|
-| Rookie Coupe | starter | 1 |
+| Rust Bucket | story mode only | 0 |
+| Rookie Coupe | $8,000 (free with a new free-play career) | 1 |
 | Vortex GT | $30,000 | 2 |
 | Raptor R | $45,000 | 3 |
 | Titan V12 | $70,000 | 3 |
@@ -47,7 +67,10 @@ Once set up you can drive the menus with the wheel: **paddles** move up/down, **
 - **Prize money** grows with your finishing position, AI difficulty (Pro pays 2.2× Medium), number of laps and opponents. A 3-lap Medium win pays roughly $6-8k.
 - **Time Trial** pays per lap, plus $1,200 for beating your personal best.
 - AI rivals drive cars from your class (or one below), so upgrading your car gives you the edge.
-- To put **NITRO** on a wheel button without redoing the whole setup: *Settings → Set NITRO button on wheel*. Keyboard: N or Left Shift. Controller: A.
+- To put **NITRO**, **REWIND** or **RADIO** on a wheel button without redoing the whole setup, use the *Set … button on wheel* options in *Settings*.
+- **Drag Race**: pick an opponent (Easy to Brutal; the tougher the rival, the better the odds), place a bet, then stage. Leave on the green: going before it is a foul and loses the run. Shift when the blue SHIFT light flashes. Winning a **pink slip** puts the rival's car in your garage; losing one takes yours.
+- **Jobs** refresh after each one you complete. The pay depends on the job and your car.
+- **Achievements** pay into whichever save (free play or story) you're playing when they unlock.
 - *Settings → Reset career* starts over from the Rookie Coupe.
 
 ### Driving tips
@@ -71,8 +94,14 @@ Once set up you can drive the menus with the wheel: **paddles** move up/down, **
 | Pause | (button you chose) | Esc / P | Menu |
 | Handbrake | (button you chose) | Space | B |
 | Nitro | (button you chose) | N / Left Shift | A |
+| Rewind (hold) | (button you chose) | T | D-pad left |
+| Radio: next station / off | (button you chose) | M | right stick click |
 
 In **Automatic**, hold the brake at a standstill to engage reverse.
+
+**Replays**: pick *Watch replay* on any results screen. Gas/Enter plays or pauses, left/right seeks 5 seconds, the camera button or up/down changes the camera (auto TV → TV → chase → helicopter → bumper), and brake/Esc exits.
+
+**Radio**: choose the station and music volume in *Settings → Display & sound*, or press M / your radio button any time. *Skip song* generates a new one.
 
 ## Troubleshooting
 
@@ -85,7 +114,7 @@ In **Automatic**, hold the brake at a standstill to engage reverse.
 
 ```bash
 npm install
-npm test            # physics, track and career checks (Node, no browser needed)
+npm test            # physics, track, career and story checks (Node, no browser needed)
 npm run build       # bundles src/ + three.js into the single-file index.html
 npx serve .         # then open http://localhost:3000/src/index.html for the unbundled dev version
 ```
@@ -96,11 +125,18 @@ Source layout (`src/`):
 |---|---|
 | `physics.js` | Vehicle dynamics: tyre model, load transfer, engine/clutch/gearbox, assists, steering torque for FFB |
 | `cars.js` | Car specs (mass, torque curves, gearing, grip, price, class) |
-| `career.js` | Money, owned cars, upgrades, prize money and mod-menu state |
+| `career.js` | Money, owned cars, upgrades, prize money, free-play and story saves, mod-menu state |
+| `story.js` | Story mode: characters, chapters, events and dialogue |
+| `drag.js` | Drag racing: Christmas tree, timing, rival, opponents, odds and bet/pink-slip settlement |
+| `jobs.js` | Jobs: courier, VIP taxi, test driver, drift show and radar run |
+| `achievements.js` | Achievement list, unlocks and rewards |
+| `replay.js` | Race recording and replay cameras |
+| `radio.js` | Procedural music radio (sequencer, synths, drums, song generator) |
 | `track.js` | Track layouts, spline sampling, racing line, AI speed profiles, terrain height |
-| `world.js` | Builds the 3D scene: terrain, road, kerbs, walls, trees, grandstands, start lights, city, ocean |
+| `world.js` | Builds the 3D scene: terrain, road, kerbs, walls, trees, grandstands, start lights, city, ocean, dragstrip, time-of-day lighting and rain |
+| `effects.js` | Tyre smoke, sparks, spray, skid marks and rain |
 | `carModel.js` | Procedural car meshes and the cockpit |
-| `game.js` | Race session: laps, positions, collisions, cameras, FFB mix, ghost car |
+| `game.js` | Race session: laps, positions, collisions, cameras, FFB mix, ghost car, rewind, drag and job sessions |
 | `ai.js` | AI drivers |
 | `input.js` / `wizard.js` | Wheel/pedal/shifter mapping and the setup wizard |
 | `ffb.js` | WebHID force feedback + rev LEDs (G29 classic protocol, G920 HID++) |

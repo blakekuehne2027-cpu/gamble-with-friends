@@ -16,6 +16,8 @@ export const DEFAULTS = {
   revLeds: true,
   units: 'mph',
   volume: 0.8,
+  radio: 0, // station index, -1 = off
+  musicVolume: 0.5,
   fov: 56,
   camera: 'cockpit',
   laps: 3,

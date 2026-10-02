@@ -1,7 +1,7 @@
 // Entry point: renderer, systems and the main loop.
 
 import * as THREE from 'three';
-import { loadSettings } from './settings.js';
+import { loadSettings, saveSettings } from './settings.js';
 import { Input } from './input.js';
 import { AudioSystem } from './audio.js';
 import { ForceFeedback } from './ffb.js';
@@ -12,6 +12,7 @@ import { Showroom } from './showroom.js';
 import { findCar, PAINT_COLORS } from './cars.js';
 import { loadCareer, loadMods, carColorIndex } from './career.js';
 import { onUnlock } from './achievements.js';
+import { Radio } from './radio.js';
 
 const settings = loadSettings();
 const career = loadCareer();
@@ -42,7 +43,20 @@ const game = new Game({ renderer, input, audio, ffb, hud, settings, career, mods
 const showroom = new Showroom(renderer);
 const startCar = findCar(settings.carId);
 showroom.setCar(startCar, PAINT_COLORS[carColorIndex(career, startCar.id)], startCar.glow ?? (mods.underglow ? 0x22d3ee : null));
-const ui = new UI({ input, audio, ffb, settings, game, showroom, career, mods });
+const radio = new Radio(audio, settings.radio, settings.musicVolume);
+const ui = new UI({ input, audio, ffb, settings, game, showroom, career, mods, radio });
+
+// Radio "now playing" card.
+const npEl = document.getElementById('np');
+let npTimer = 0;
+radio.onSong = (np) => {
+  npEl.innerHTML = np
+    ? `<b>📻 ${np.station}</b><span>${np.artist} — “${np.title}”</span><i>${np.genre}</i>`
+    : '<b>📻 Radio off</b>';
+  npEl.classList.add('show');
+  clearTimeout(npTimer);
+  npTimer = setTimeout(() => npEl.classList.remove('show'), np ? 6000 : 2000);
+};
 
 // Achievement pop-ups.
 onUnlock((a) => {
@@ -69,7 +83,7 @@ resize();
 ui.show('title');
 
 // Debug/automation hook.
-window.__redline = { game, input, ui, settings, ffb, audio, career, mods };
+window.__redline = { game, input, ui, settings, ffb, audio, career, mods, radio };
 
 let last = performance.now();
 const fpsEl = document.getElementById('fps');
@@ -80,6 +94,13 @@ function frame(now) {
   const dt = Math.min(0.1, (now - last) / 1000);
   last = now;
   input.poll();
+  radio.tick();
+  if (input.state.pressed.radio && !ui.binding && !ui.wizard.active) {
+    settings.radio = radio.next();
+    saveSettings(settings);
+    if (ui.mode === 'menu' && ui.screen === 'settings') ui._rerender();
+    else if (ui.overlayName === 'pause' && ui.overlay.classList.contains('show')) ui._showOverlay('pause');
+  }
   ui.update(dt);
   if (ui.mode === 'menu') {
     showroom.update(dt);
