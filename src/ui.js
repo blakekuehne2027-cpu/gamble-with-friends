@@ -9,6 +9,8 @@ import { saveSettings, loadJSON } from './settings.js';
 import { getTrack } from './game.js';
 import { Wizard } from './wizard.js';
 import { fmtTime } from './hud.js';
+import { makeOpponents, BETS, betAmount, simulateRun, dragTrackIndex, carValue } from './drag.js';
+import { jobBoard, fmtLap } from './jobs.js';
 import {
   UPGRADES, buyCar, buyUpgrade, upgradeLevel, upgradeCost, owns, buildSpec, perfStats, carColorIndex,
   saveCareer, saveMods, unlockCar, unlockAll, maxUpgrades, maxPrize, fmtMoney, MOD_DEFAULTS, modsActive, newCareer,
@@ -119,6 +121,8 @@ export class UI {
       <div class="menu-list">
         <button class="btn big nav" data-act="race" ${needsSetup ? '' : 'data-default="1"'}>Race</button>
         <button class="btn big nav" data-act="tt">Time Trial</button>
+        <button class="btn big nav" data-act="drag">Drag Race</button>
+        <button class="btn big nav" data-act="jobs">Jobs</button>
         <button class="btn big nav" data-act="garage">Garage</button>
         <button class="btn big nav mod-btn" data-act="mods">Mod Menu${modsActive(this.mods) ? ' <small>ON</small>' : ''}</button>
         <button class="btn big nav" data-act="wizard">Wheel Setup</button>
@@ -153,6 +157,8 @@ export class UI {
           ${race ? this._optRow('laps', 'Laps', S.laps) : ''}
           ${race ? this._optRow('opponents', 'Opponents', S.opponents) : ''}
           ${race ? this._optRow('difficulty', 'AI difficulty', DIFF[S.difficulty]) : ''}
+          ${this._optRow('timeOfDay', 'Time of day', timeName(S.timeOfDay, t))}
+          ${this._optRow('weather', 'Weather', S.weather === 'rain' ? '🌧 Rain' : '☀ Dry')}
           ${this._optRow('transmission', 'Transmission', transName(S.transmission))}
           <p class="prize">${race ? `Win up to <b>${fmtMoney(prize)}</b> + overtake, drift &amp; speed-trap bonuses` : `Earn <b>${fmtMoney(Math.round(getTrack(S.track).length / 1000 * 110 / 10) * 10)}</b> per lap + <b>$1,200</b> for a new personal best`}</p>
           <button class="btn primary big nav" data-act="go" data-default="1">${race ? 'Start Race' : 'Start Session'}</button>
@@ -163,7 +169,7 @@ export class UI {
           <div class="card">
             <canvas id="trackmap" width="300" height="220"></canvas>
             <h3>${t.name}</h3><p>${t.blurb}</p>
-            <p class="dim">${(getTrack(S.track).length / 1000).toFixed(2)} km · ${t.theme === 'night' ? 'Night' : t.theme === 'forest' ? 'Golden hour' : 'Midday'}</p>
+            <p class="dim">${(getTrack(S.track).length / 1000).toFixed(2)} km · ${timeName(S.timeOfDay, t)}${S.weather === 'rain' ? ' · wet track (less grip!)' : ''}</p>
             ${!race ? `<p class="dim">Your best (${c.name}): <b>${best ? fmtTime(best.time) : 'none yet'}</b> ${best ? '· ghost car will race you' : ''}</p>` : ''}
           </div>
           <div class="card">
@@ -220,9 +226,13 @@ export class UI {
             ${bar('Nitro', p.nitro, 6, p.nitro ? p.nitro + ' s' : 'none')}
             <p class="dim">${car.cylinders === 12 ? 'V12' : car.cylinders === 8 ? 'V8' : 'Inline-4'} · redline ${car.redline} rpm · class ${car.tier}${car.price ? ` · ${fmtMoney(car.price)}` : ''}</p>
           </div>
-          <div class="card garage-list">${CARS.map((c) => `<div class="${c.id === car.id ? 'cur' : ''}"><span>${c.name}</span><em>${owns(C, c.id) ? (c.id === this.S.carId ? 'DRIVING' : 'OWNED') : c.modOnly ? 'MOD' : fmtMoney(c.price)}</em></div>`).join('')}</div>
+          <div class="card garage-list">${this._garageCars().map((c) => `<div class="${c.id === car.id ? 'cur' : ''}"><span>${c.name}</span><em>${owns(C, c.id) ? (c.id === this.S.carId ? 'DRIVING' : 'OWNED') : c.modOnly ? 'MOD' : fmtMoney(c.price)}</em></div>`).join('')}</div>
         </div>
       </div>`;
+  }
+
+  _garageCars() {
+    return CARS.filter((c) => !c.junker || owns(this.career, c.id));
   }
 
   _modRows() {
@@ -405,8 +415,17 @@ export class UI {
       case 'resume': this.togglePause(); break;
       case 'restart': this.closeOverlay(); this.game.restart(); this._enterRace(); break;
       case 'quit': this.closeOverlay(); this.game.stop(); this.show('main', true); this.stack = ['title']; break;
-      case 'again': this.closeOverlay(); this.game.restart(); this._enterRace(); break;
+      case 'again':
+        if (this.lastResults?.type === 'drag') { this.closeOverlay(); this._startDrag(true); break; }
+        this.closeOverlay(); this.game.restart(); this._enterRace(); break;
       case 'garage': this.show('garage'); break;
+      case 'drag': this.show('drag'); break;
+      case 'jobs': this.show('jobs'); break;
+      case 'jobRetry': this.closeOverlay(); this.game.restart(); this._enterRace(); break;
+      case 'jobBoard': this.closeOverlay(); this.game.stop(); this.stack = ['title', 'main']; this.show('jobs'); break;
+      case 'dragGo': this._startDrag(); break;
+      case 'dragNew': this._dragSeed = (this._dragSeed || 1) + 1; this._dragKey = null; this._rerender(); break;
+      case 'dragSetup': this.closeOverlay(); this.game.stop(); this.stack = ['title', 'main']; this.show('drag'); break;
       case 'mods': this.show('mods'); break;
       case 'pausemods': this._showOverlay('pausemods'); break;
       case 'pauseback': this._showOverlay('pause'); break;
@@ -439,7 +458,8 @@ export class UI {
         }
         break;
       default:
-        if (a.startsWith('up:')) this._buyUpgrade(a.slice(3));
+        if (a.startsWith('job:')) this._startJob(this._board[+a.slice(4)]);
+        else if (a.startsWith('up:')) this._buyUpgrade(a.slice(3));
         else if (a.startsWith('mod:')) this._modAction(a.slice(4));
     }
   }
@@ -522,7 +542,23 @@ export class UI {
     const cyc = (arr, v) => arr[(arr.indexOf(v) + dir + arr.length) % arr.length];
     const step = (v, lo, hi, st) => Math.round(Math.max(lo, Math.min(hi, v + dir * st)) / st) * st;
     switch (key) {
-      case 'track': S.track = (S.track + dir + TRACKS.length) % TRACKS.length; break;
+      case 'track': {
+        const circuits = TRACKS.map((t, i) => (t.drag ? -1 : i)).filter((i) => i >= 0);
+        const i = Math.max(0, circuits.indexOf(S.track));
+        S.track = circuits[(i + dir + circuits.length) % circuits.length];
+        break;
+      }
+      case 'dragOpp': this.dragOppIdx = ((this.dragOppIdx || 0) + dir + 4) % 4; break;
+      case 'dragBet': {
+        let i = this.dragBetIdx || 0;
+        for (let k = 0; k < BETS.length; k++) {
+          i = (i + dir + BETS.length) % BETS.length;
+          const b = BETS[i];
+          if (typeof b !== 'number' || b <= this.career.money) break;
+        }
+        this.dragBetIdx = i;
+        break;
+      }
       case 'car': {
         const mine = CARS.filter((c) => owns(this.career, c.id));
         const i = mine.findIndex((c) => c.id === S.carId);
@@ -539,8 +575,9 @@ export class UI {
         break;
       }
       case 'garageCar': {
-        const i = CARS.findIndex((c) => c.id === this.garageId);
-        this.garageId = CARS[(i + dir + CARS.length) % CARS.length].id;
+        const list = this._garageCars();
+        const i = list.findIndex((c) => c.id === this.garageId);
+        this.garageId = list[(i + dir + list.length) % list.length].id;
         if (owns(this.career, this.garageId)) S.carId = this.garageId;
         break;
       }
@@ -548,6 +585,8 @@ export class UI {
       case 'opponents': S.opponents = Math.max(0, Math.min(9, S.opponents + dir)); break;
       case 'difficulty': S.difficulty = (S.difficulty + dir + 4) % 4; break;
       case 'transmission': S.transmission = cyc(['h', 'seq', 'auto'], S.transmission); break;
+      case 'timeOfDay': S.timeOfDay = cyc(['default', 'day', 'sunset', 'night'], S.timeOfDay); break;
+      case 'weather': S.weather = S.weather === 'rain' ? 'dry' : 'rain'; break;
       case 'wheelRange': S.wheelRange = step(S.wheelRange, 180, 1080, 30); break;
       case 'steerRatio': S.steerRatio = step(S.steerRatio, 6, 20, 1); break;
       case 'ffbStrength': S.ffbStrength = +step(S.ffbStrength, 0, 1, 0.05).toFixed(2); break;
@@ -602,6 +641,7 @@ export class UI {
     this.game.start({
       mode: this.setupMode, track: S.track, carId: S.carId, color: carColorIndex(this.career, S.carId),
       laps: S.laps, opponents: S.opponents, difficulty: S.difficulty,
+      time: S.timeOfDay, rain: S.weather === 'rain',
     });
     this._enterRace();
   }
@@ -669,8 +709,170 @@ export class UI {
     this.mode = 'results';
     this.game.setPaused(true);
     this.lastResults = r;
-    this.audio.cash?.();
-    this._showOverlay('results');
+    saveSettings(this.S);
+    if (r.type !== 'drag' || r.win) this.audio.cash?.();
+    this._showOverlay(r.type === 'drag' ? 'dragresults' : r.type === 'job' ? 'jobresults' : 'results');
+  }
+
+  _overlay_dragresults() {
+    const r = this.lastResults;
+    const f = (v) => (v === undefined || v === null ? '—' : v.toFixed(3));
+    const mph = (v) => (v === undefined || v === null ? '—' : v.toFixed(1));
+    const row = (label, a, b) => `<tr><td>${label}</td><td>${a}</td><td>${b}</td></tr>`;
+    const rt = (L) => (L.foul ? '<span class="red">RED LIGHT</span>' : f(L.rt));
+    const rows = [
+      row('Reaction', rt(r.you), rt(r.them)),
+      ...['60 ft', '330 ft', '1/8 mile'].map((k) => row(k, f(r.you.splits[k]), f(r.them.splits[k]))),
+      row('1/8 mph', mph(r.you.speeds['1/8 mile']), mph(r.them.speeds['1/8 mile'])),
+      row('1000 ft', f(r.you.splits['1000 ft']), f(r.them.splits['1000 ft'])),
+      row('<b>1/4 mile</b>', `<b>${f(r.you.et)}</b>`, `<b>${f(r.them.et)}</b>`),
+      row('<b>1/4 mph</b>', `<b>${mph(r.you.speeds['1/4 mile'])}</b>`, `<b>${mph(r.them.speeds['1/4 mile'])}</b>`),
+    ].join('');
+    const lines = r.lines.map(([label, v]) => `<div><span>${esc(label)}</span>${v ? `<b class="${v < 0 ? 'neg' : ''}">${v < 0 ? '-' : '+'}${fmtMoney(Math.abs(v))}</b>` : ''}</div>`).join('');
+    const story = r.story;
+    return `
+      <h1 class="title ${r.win ? '' : 'lose'}">${r.win ? 'You win!' : r.you.foul ? 'Red light!' : 'You lose'}</h1>
+      <p class="dim">${esc(r.carName)} vs ${esc(r.opp.name)} (${esc(r.rivalCar)})${r.pink ? ' · <b class="pink">PINK SLIPS</b>' : r.bet ? ` · bet ${fmtMoney(r.bet)}` : ''}</p>
+      <div class="results-wrap">
+        <table class="results slip"><thead><tr><th>Time slip</th><th>YOU</th><th>${esc(r.opp.name)}</th></tr></thead><tbody>${rows}</tbody></table>
+        <div class="earnings"><h4>${r.pink ? 'Pink slips' : 'Payout'}</h4>${lines || '<div><span>No bet</span></div>'}<div class="bal"><span>Balance</span><b>${fmtMoney(r.balance)}</b></div>
+        ${r.shifts.length ? `<p class="dim shifts">Shifts: ${r.shifts.map(esc).join(' · ')}</p>` : ''}</div>
+      </div>
+      <div class="menu-list row">
+        ${story ? `<button class="btn primary big nav" data-act="storyNext" data-default="1">Continue story</button>${!r.win ? '<button class="btn big nav" data-act="storyRetry">Try again</button>' : ''}` : `<button class="btn primary big nav" data-act="again" data-default="1">Run it back</button>
+        <button class="btn big nav" data-act="dragSetup">Change opponent / bet</button>`}
+        <button class="btn big nav" data-act="quit">Main menu</button>
+      </div>`;
+  }
+
+  _screen_jobs() {
+    const C = this.career, S = this.S;
+    if (!owns(C, S.carId)) S.carId = Object.keys(C.owned)[0];
+    this._board = jobBoard(C, S.carId);
+    const cards = this._board.map((j, i) => `
+      <button class="job-card nav" data-act="job:${i}" ${i === 0 ? 'data-default="1"' : ''}>
+        <h3>${j.icon} ${j.name}</h3>
+        <p class="t">${esc(j.title)}</p>
+        <p>${esc(j.blurb)}</p>
+        <p class="tags"><span>${esc(j.trackName)}</span>${j.time === 'night' ? '<span>NIGHT</span>' : ''}${j.rain ? '<span>RAIN</span>' : ''}${j.carId ? `<span>LOANER: ${esc(findCar(j.carId).name)}</span>` : `<span>YOUR ${esc(findCar(S.carId).name.toUpperCase())}</span>`}${j.limit ? `<span>${j.limit}s</span>` : ''}</p>
+        <div class="pay">${fmtMoney(j.pay)}</div>
+      </button>`).join('');
+    return `
+      <h1 class="title">Job Board</h1>
+      ${this._money()}
+      <p class="tag small">Honest work for an underdog. New jobs appear every time you finish one. ${C.stats.jobs ? `Jobs done: ${C.stats.jobs}.` : ''}</p>
+      <div class="jobs">${cards}</div>
+      <button class="btn ghost nav" data-act="back" style="margin-top:18px">Back</button>`;
+  }
+
+  _startJob(job, story = null) {
+    const S = this.S, C = this.career;
+    const carId = job.carId || S.carId;
+    this.audio.init();
+    this.lastJob = job;
+    this.game.start({
+      mode: 'job', track: job.track, carId, color: carColorIndex(C, carId), time: job.time, rain: job.rain,
+      job, laps: 1, opponents: 0, difficulty: 1, story,
+    });
+    this._enterRace();
+  }
+
+  _overlay_jobresults() {
+    const r = this.lastResults;
+    const lines = r.lines.map(([label, v]) => `<div><span>${esc(label)}</span>${v ? `<b>+${fmtMoney(v)}</b>` : ''}</div>`).join('');
+    return `
+      <h1 class="title ${r.success ? '' : 'lose'}">${r.success ? 'Job done!' : 'Job failed'}</h1>
+      <p class="dim">${r.job.icon} ${esc(r.job.name)} · ${esc(r.job.title)}</p>
+      <div class="earnings wide"><h4>${r.success ? 'Paid' : 'No pay'}</h4>${lines}${r.success ? `<div class="total"><span>Total</span><b>+${fmtMoney(r.pay)}</b></div>` : ''}<div class="bal"><span>Balance</span><b>${fmtMoney(r.balance)}</b></div></div>
+      <div class="menu-list row">
+        ${r.story ? `<button class="btn primary big nav" data-act="storyNext" data-default="1">Continue story</button>${r.success ? '' : '<button class="btn big nav" data-act="storyRetry">Try again</button>'}` : r.success ? '<button class="btn primary big nav" data-act="jobBoard" data-default="1">Job board</button>' : '<button class="btn primary big nav" data-act="jobRetry" data-default="1">Try again</button><button class="btn big nav" data-act="jobBoard">Job board</button>'}
+        <button class="btn big nav" data-act="quit">Main menu</button>
+      </div>`;
+  }
+
+  _screen_drag() {
+    const S = this.S, C = this.career;
+    if (!owns(C, S.carId)) S.carId = Object.keys(C.owned)[0];
+    const car = findCar(S.carId);
+    const spec = buildSpec(car, C.owned[car.id]?.up, this.mods);
+    const key = `${car.id}|${JSON.stringify(C.owned[car.id]?.up || {})}|${JSON.stringify(this.mods)}|${this._dragSeed || 1}`;
+    if (this._dragKey !== key) {
+      this._dragKey = key;
+      this.dragOpps = makeOpponents(spec, key, this._dragSeed || 1);
+      this._youRun = simulateRun(spec, key);
+    }
+    const opp = this.dragOpps[this.dragOppIdx || 0];
+    const betOpt = BETS[this.dragBetIdx || 0];
+    const amount = betAmount(betOpt, C.money);
+    const pink = betOpt === 'pink';
+    const betLabel = pink ? '<span class="pink">PINK SLIPS</span>' : betOpt === 'all' ? `ALL IN (${fmtMoney(amount)})` : amount ? fmtMoney(amount) : 'No bet';
+    const oppCar = findCar(opp.carId);
+    const lvl = opp.up.engine || 0;
+    return `
+      <h1 class="title">Drag Race</h1>
+      ${this._money()}
+      <div class="setup">
+        <div class="setup-opts">
+          ${this._optRow('car', 'Your car', car.name)}
+          ${this._optRow('dragOpp', 'Opponent', `${opp.name} <small class="tier tier-${opp.label}">${opp.label}</small>`)}
+          ${this._optRow('dragBet', 'Bet', betLabel)}
+          ${this._optRow('timeOfDay', 'Time of day', timeName(S.timeOfDay, TRACKS[dragTrackIndex(TRACKS)]))}
+          ${this._optRow('weather', 'Weather', S.weather === 'rain' ? '🌧 Rain' : '☀ Dry')}
+          ${this._optRow('transmission', 'Transmission', transName(S.transmission))}
+          <p class="prize">${pink ? `Win: their <b>${oppCar.name}</b> (worth ~${fmtMoney(Math.round((oppCar.price || 8000) * 0.6))}). Lose: <b class="neg">your ${car.name}</b> and its upgrades.` : amount ? `Pays <b>${opp.odds.toFixed(2)}×</b>: win <b>+${fmtMoney(Math.round(amount * (opp.odds - 1)))}</b>, lose <b class="neg">-${fmtMoney(amount)}</b>` : 'Winner gets a $300 purse. Add a bet to make it interesting.'}</p>
+          <button class="btn primary big nav" data-act="dragGo" data-default="1">${pink ? 'Race for pink slips' : 'Stage the car'}</button>
+          <button class="btn nav" data-act="dragNew">New challengers</button>
+          <button class="btn ghost nav" data-act="back">Back</button>
+        </div>
+        <div class="setup-info">
+          <div class="card">
+            <h3>${opp.name}</h3>
+            <p>Drives a <b>${oppCar.name}</b>${lvl ? ` with stage ${lvl} engine, weight and tyre upgrades` : ' (stock)'}.</p>
+            <div class="vs"><div><label>Your best possible</label><b>${this._youRun.et.toFixed(2)}s</b><span>${this._youRun.trap.toFixed(0)} mph</span></div><div><label>Their best</label><b>${opp.et.toFixed(2)}s</b><span>${opp.trap.toFixed(0)} mph</span></div></div>
+            <p class="dim">Reaction: ${opp.rt < 0.15 ? 'lightning' : opp.rt < 0.22 ? 'sharp' : 'sleepy'} · Odds ${opp.odds.toFixed(2)}×</p>
+          </div>
+          <div class="card">
+            <h3>How to launch</h3>
+            <p>Hold the <b>brake</b> (or clutch in, in 1st) and the <b>gas</b>: launch control holds the revs. Three ambers, then <b>GO on green</b>. Leave early and it's a <span class="red">red light</span>.</p>
+            <p>Shift when the big blue <b>SHIFT</b> flashes for a perfect shift.</p>
+          </div>
+        </div>
+      </div>`;
+  }
+
+  _startDrag(again = false) {
+    const S = this.S, C = this.career;
+    if (!owns(C, S.carId)) {
+      this.toast('You don\'t own that car any more.');
+      this.stack = ['title', 'main'];
+      this.show('drag');
+      return;
+    }
+    const opp = this.dragOpps?.[this.dragOppIdx || 0];
+    if (!opp) { this.show('drag'); return; }
+    let betOpt = BETS[this.dragBetIdx || 0];
+    const pink = betOpt === 'pink';
+    let bet = betAmount(betOpt, C.money);
+    if (bet > C.money) {
+      this.dragBetIdx = 0;
+      bet = 0;
+      this.toast('Not enough money for that bet. Racing for the purse only.');
+    }
+    if ((pink || betOpt === 'all') && !again) {
+      if (!this._confirmBet || performance.now() - this._confirmBet > 4000) {
+        this._confirmBet = performance.now();
+        this.toast(pink ? `Sure? If you lose, ${opp.name} takes your ${findCar(S.carId).name}. Press again to race.` : 'All in? Press again to confirm.');
+        return;
+      }
+    }
+    this._confirmBet = 0;
+    saveSettings(S);
+    this.audio.init();
+    this.game.start({
+      mode: 'drag', track: dragTrackIndex(TRACKS), carId: S.carId, color: carColorIndex(C, S.carId),
+      time: S.timeOfDay, rain: S.weather === 'rain', opp, bet, pink, laps: 1, opponents: 0, difficulty: 1,
+    });
+    this._enterRace();
   }
 
   _showOverlay(name) {
@@ -749,6 +951,12 @@ UI.prototype.frameCount = 0;
 
 function transName(t) {
   return t === 'h' ? 'H-Shifter' : t === 'seq' ? 'Sequential (paddles)' : 'Automatic';
+}
+function timeName(v, track) {
+  const def = { coast: 'day', pine: 'sunset', night: 'night' }[track.id] || 'day';
+  const k = v === 'default' ? def : v;
+  const label = { day: 'Midday', sunset: 'Sunset', night: 'Night' }[k];
+  return v === 'default' ? `${label} (track default)` : label;
 }
 function camName(c) {
   return { cockpit: 'Cockpit', hood: 'Bonnet', chase: 'Chase', far: 'Far chase' }[c];

@@ -63,10 +63,23 @@ export class HUD {
       <div class="hud-cash" id="h-cash"></div>
       <div class="hud-sub" id="h-sub"></div>
       <div class="hud-lights" id="h-lights"><i></i><i></i><i></i><i></i><i></i></div>
+      <div class="hud-drag" id="h-drag">
+        <div class="tree">
+          <div class="col" id="h-tree-them"><span class="lbl">RIVAL</span><i class="st"></i><i class="st"></i><i class="am"></i><i class="am"></i><i class="am"></i><i class="gr"></i><i class="rd"></i></div>
+          <div class="col" id="h-tree-you"><span class="lbl">YOU</span><i class="st"></i><i class="st"></i><i class="am"></i><i class="am"></i><i class="am"></i><i class="gr"></i><i class="rd"></i></div>
+        </div>
+        <div class="drag-side">
+          <div class="drag-timer" id="h-dragtime">0.000</div>
+          <div class="drag-bar"><label>YOU</label><div><i id="h-dragyou"></i></div></div>
+          <div class="drag-bar them"><label id="h-dragname2">RIVAL</label><div><i id="h-dragthem"></i></div></div>
+        </div>
+      </div>
+      <div class="hud-shift" id="h-shift">SHIFT</div>
+      <div class="hud-job" id="h-job"><div class="jt"><b id="h-jobtitle"></b><span id="h-jobtimer"></span></div><div id="h-jobl1"></div><div id="h-jobl2"></div></div>
     `;
     const $ = (id) => root.querySelector('#' + id);
     this.el = {};
-    for (const id of ['pos', 'of', 'lap', 'laps', 'board', 'cur', 'last', 'best', 'delta', 'map', 'leds', 'rpmfill', 'rpmred', 'gear', 'speed', 'unit', 'abs', 'tc', 'clutch', 'trans', 'tele', 'wheel', 'pc', 'pb', 'pt', 'hp', 'knob', 'msg', 'sub', 'lights', 'nitro', 'nitrofill', 'mods', 'drift', 'cash']) {
+    for (const id of ['pos', 'of', 'lap', 'laps', 'board', 'cur', 'last', 'best', 'delta', 'map', 'leds', 'rpmfill', 'rpmred', 'gear', 'speed', 'unit', 'abs', 'tc', 'clutch', 'trans', 'tele', 'wheel', 'pc', 'pb', 'pt', 'hp', 'knob', 'msg', 'sub', 'lights', 'nitro', 'nitrofill', 'mods', 'drift', 'cash', 'drag', 'dragname2', 'dragtime', 'dragyou', 'dragthem', 'shift', 'tree-you', 'tree-them', 'job', 'jobtitle', 'jobtimer', 'jobl1', 'jobl2']) {
       this.el[id] = $('h-' + id);
     }
     this.ledEls = [];
@@ -144,8 +157,11 @@ export class HUD {
     }
   }
 
-  setMode({ race, laps, units, cars }) {
+  setMode({ race, laps, units, cars, drag = false, job = false }) {
     this.root.classList.toggle('tt', !race);
+    this.root.classList.toggle('drag', drag);
+    this.root.classList.toggle('job', job);
+    this._dragName = null;
     this._set('laps', this.el.laps, race ? `/${laps}` : '');
     this._set('of', this.el.of, `/${cars}`);
     this._set('unit', this.el.unit, units === 'mph' ? 'MPH' : 'KM/H');
@@ -220,6 +236,37 @@ export class HUD {
       this.subTimer -= d.dt;
       if (this.subTimer <= 0) e.sub.classList.remove('show');
     }
+  }
+
+  jobUpdate({ title, timer, line1, line2, warn }) {
+    const e = this.el;
+    this._set('jobtitle', e.jobtitle, title);
+    this._set('jobtimer', e.jobtimer, timer === null ? '' : fmtTime(timer).replace(/\.\d+$/, (m) => m.slice(0, 2)));
+    this._set('jobl1', e.jobl1, line1);
+    this._set('jobl2', e.jobl2, line2);
+    e.job.classList.toggle('warn', !!warn);
+  }
+
+  dragUpdate(st) {
+    const e = this.el;
+    if (this._dragName !== st.rivalName) {
+      this._dragName = st.rivalName;
+      e.dragname2.textContent = st.rivalName.toUpperCase();
+    }
+    const paint = (col, red) => {
+      const b = col.querySelectorAll('i');
+      const set = (el, on) => { if (el.classList.contains('on') !== on) el.classList.toggle('on', on); };
+      set(b[0], st.phase !== 'staging'); set(b[1], st.phase !== 'staging');
+      for (let i = 0; i < 3; i++) set(b[2 + i], st.ambers > i && !st.green);
+      set(b[5], st.green && !red);
+      set(b[6], red);
+    };
+    paint(e['tree-you'], st.redYou);
+    paint(e['tree-them'], st.redThem);
+    this._set('dragtime', e.dragtime, st.timer.toFixed(3));
+    e.dragyou.style.transform = `scaleX(${st.you.toFixed(3)})`;
+    e.dragthem.style.transform = `scaleX(${st.them.toFixed(3)})`;
+    e.shift.classList.toggle('show', !!st.shift && (performance.now() / 90) % 2 < 1.3);
   }
 
   // frac 0..1, or -1 to hide the bar (car has no nitrous).

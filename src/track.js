@@ -57,7 +57,26 @@ export const TRACKS = [
       [-330, 240, 0], [-370, 200, 0], [-380, 150, 0], [-380, 60, 0], [-355, 15, 0],
     ],
   },
+  {
+    id: 'strip',
+    name: 'Thunder Valley Dragway',
+    blurb: 'Quarter-mile drag strip. Two lanes, one winner.',
+    theme: 'strip',
+    drag: true,
+    width: 18,
+    wallDist: 14,
+    terrain: { base: 0, amp: 10, oceanSide: 0 },
+    // A long straight (the strip + shutdown area) closed into a loop so the
+    // track code can treat it like any other circuit.
+    points: [
+      [0, 0, 0], [400, 0, 0], [800, 0, 0], [1200, 0, 0], [1500, 0, 0], [1606, 44, 0], [1650, 150, 0], [1606, 256, 0],
+      [1500, 300, 0], [1000, 300, 0], [500, 300, 0], [0, 300, 0], [-500, 300, 0], [-606, 256, 0], [-650, 150, 0],
+      [-606, 44, 0], [-500, 0, 0],
+    ],
+  },
 ];
+
+export const QUARTER_MILE = 402.34;
 
 const SAMPLE_SPACING = 2; // metres between track samples
 
@@ -437,3 +456,9 @@ export class Track {
 }
 
 const _tmpProj = {};
+
+const trackCache = new Map();
+export function getTrack(i) {
+  if (!trackCache.has(i)) trackCache.set(i, new Track(TRACKS[i]));
+  return trackCache.get(i);
+}

@@ -23,6 +23,8 @@ export const DEFAULTS = {
   difficulty: 1, // 0 easy, 1 medium, 2 hard, 3 pro
   track: 0,
   carId: 'rookie',
+  timeOfDay: 'default', // 'default' (track's own), 'day', 'sunset', 'night'
+  weather: 'dry', // 'dry' | 'rain'
   showTelemetry: true,
   graphics: 'high',
 };

@@ -67,6 +67,13 @@ export class Particles {
       1.6 + Math.random() * 1.2 * intensity, 0.9 + intensity * 0.7, c, c, c * 1.02);
   }
 
+  spray(x, y, z, vx, vz, night) {
+    const c = night ? 0.45 : 0.85;
+    this.emit(0, x + (Math.random() - 0.5) * 0.6, y + 0.25, z + (Math.random() - 0.5) * 0.6,
+      vx * 0.55 + (Math.random() - 0.5) * 2, 0.8 + Math.random() * 1.2, vz * 0.55 + (Math.random() - 0.5) * 2,
+      0.5 + Math.random() * 0.4, 1.1, c, c * 1.02, c * 1.06);
+  }
+
   dirt(x, y, z, vx, vz) {
     this.emit(2, x, y + 0.1, z, vx * 0.2 + (Math.random() - 0.5) * 2, 1.5 + Math.random() * 2, vz * 0.2 + (Math.random() - 0.5) * 2,
       0.7 + Math.random() * 0.5, 0.35, 0.36, 0.28, 0.18);
@@ -183,5 +190,51 @@ export class SkidMarks {
     this.geo.attributes.color.clearUpdateRanges();
     this.geo.attributes.position.needsUpdate = true;
     this.geo.attributes.color.needsUpdate = true;
+  }
+}
+
+// Falling rain streaks in a box that follows the camera.
+export class Rain {
+  constructor(scene, count = 5000, night = false) {
+    this.count = count;
+    this.box = { x: 70, y: 36, z: 70 };
+    this.off = new Float32Array(count * 3);
+    for (let i = 0; i < count; i++) {
+      this.off[i * 3] = (Math.random() - 0.5) * this.box.x;
+      this.off[i * 3 + 1] = Math.random() * this.box.y;
+      this.off[i * 3 + 2] = (Math.random() - 0.5) * this.box.z;
+    }
+    this.pos = new Float32Array(count * 6);
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(this.pos, 3).setUsage(THREE.DynamicDrawUsage));
+    this.geo = geo;
+    this.mesh = new THREE.LineSegments(geo, new THREE.LineBasicMaterial({ color: night ? 0x8090b0 : 0xc8d2e0, transparent: true, opacity: night ? 0.45 : 0.38, depthWrite: false }));
+    this.mesh.frustumCulled = false;
+    scene.add(this.mesh);
+    this.center = new THREE.Vector3();
+  }
+
+  // focus: world point the box is centred on; wind: world velocity of the
+  // viewer (streaks lean back when you drive fast).
+  update(dt, focus, vx, vz) {
+    const B = this.box, o = this.off, p = this.pos;
+    const fall = 16 * dt;
+    const lx = -vx * 0.035, lz = -vz * 0.035;
+    // Keep the drops fixed in the world while the box follows the camera.
+    const dx = focus.x - this.center.x, dz = focus.z - this.center.z;
+    this.center.set(focus.x, focus.y, focus.z);
+    for (let i = 0; i < this.count; i++) {
+      const k = i * 3;
+      let x = o[k] - dx, y = o[k + 1] - fall, z = o[k + 2] - dz;
+      if (y < -4) y += B.y;
+      if (x < -B.x / 2) x += B.x; else if (x > B.x / 2) x -= B.x;
+      if (z < -B.z / 2) z += B.z; else if (z > B.z / 2) z -= B.z;
+      o[k] = x; o[k + 1] = y; o[k + 2] = z;
+      const wx = focus.x + x, wy = focus.y + y - 6, wz = focus.z + z;
+      const j = i * 6;
+      p[j] = wx; p[j + 1] = wy; p[j + 2] = wz;
+      p[j + 3] = wx + lx; p[j + 4] = wy - 0.55; p[j + 5] = wz + lz;
+    }
+    this.geo.attributes.position.needsUpdate = true;
   }
 }

@@ -3,36 +3,77 @@
 
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { smoothstep, fbm } from './track.js';
+import { smoothstep, fbm, QUARTER_MILE } from './track.js';
 
 export const ROAD_Y = 0.1; // road surface sits slightly above the terrain
 
-export const THEMES = {
+// Scenery per track theme (what's on the ground) ...
+export const SCENERY = {
+  day: {
+    grass: [0x4e8a2a, 0x6b9c35], mow: 0x5b9a33, sand: 0xd8c690, rock: 0x7d7b74,
+    trees: 'round', treeCount: 1300, water: true, mountains: 0x7f97ad, defaultTime: 'day',
+  },
+  forest: {
+    grass: [0x3f6e24, 0x587f2c], mow: 0x4c7f2a, sand: 0xb59c6c, rock: 0x6f6a62,
+    trees: 'pine', treeCount: 3200, water: false, mountains: 0x8a8f99, defaultTime: 'sunset',
+  },
+  night: {
+    grass: [0x2f4a26, 0x3d5a2e], mow: 0x35502c, sand: 0x5a5448, rock: 0x4a4a50,
+    trees: null, treeCount: 0, water: false, mountains: null, city: true, lamps: true, defaultTime: 'night',
+  },
+  strip: {
+    grass: [0x8a8a4a, 0xa39a5c], mow: 0x7f8a45, sand: 0xc9b07a, rock: 0x8a7a66,
+    trees: 'round', treeCount: 500, water: false, mountains: 0xa0846c, lamps: true, defaultTime: 'sunset',
+  },
+};
+
+// ... and lighting presets (time of day).
+export const LIGHTING = {
   day: {
     skyTop: 0x2f6fd0, skyHorizon: 0xcfe3f2, skyBottom: 0x8aa7bf,
     fog: 0xc4d9ea, fogNear: 350, fogFar: 3200,
     sunDir: [0.45, 0.62, -0.35], sunColor: 0xfff1d8, sunIntensity: 3.2,
-    hemiSky: 0xcfe6ff, hemiGround: 0x546b3a, hemiIntensity: 1.25,
-    grass: [0x4e8a2a, 0x6b9c35], mow: 0x5b9a33, sand: 0xd8c690, rock: 0x7d7b74,
-    trees: 'round', treeCount: 1300, water: true, mountains: 0x7f97ad, exposure: 1.0,
+    hemiSky: 0xcfe6ff, hemiGround: 0x546b3a, hemiIntensity: 1.25, exposure: 1.0, env: 0.9,
   },
-  forest: {
-    skyTop: 0x4d79b8, skyHorizon: 0xf2d6b0, skyBottom: 0x9a8a7a,
-    fog: 0xd9c9b0, fogNear: 200, fogFar: 2200,
-    sunDir: [-0.6, 0.32, 0.5], sunColor: 0xffd29a, sunIntensity: 3.0,
-    hemiSky: 0xffe4c4, hemiGround: 0x3d4a2a, hemiIntensity: 1.1,
-    grass: [0x3f6e24, 0x587f2c], mow: 0x4c7f2a, sand: 0xb59c6c, rock: 0x6f6a62,
-    trees: 'pine', treeCount: 3200, water: false, mountains: 0x8a8f99, exposure: 1.05,
+  sunset: {
+    skyTop: 0x4d79b8, skyHorizon: 0xf2c99a, skyBottom: 0x9a8a7a,
+    fog: 0xdcc3a5, fogNear: 200, fogFar: 2200,
+    sunDir: [-0.6, 0.26, 0.5], sunColor: 0xffc785, sunIntensity: 3.0,
+    hemiSky: 0xffe0bd, hemiGround: 0x3d4a2a, hemiIntensity: 1.1, exposure: 1.05, env: 0.85,
   },
   night: {
     skyTop: 0x02040c, skyHorizon: 0x1b2140, skyBottom: 0x0a0c16,
     fog: 0x0d1122, fogNear: 80, fogFar: 900,
     sunDir: [0.3, 0.8, 0.4], sunColor: 0x9fb4ff, sunIntensity: 0.35,
-    hemiSky: 0x4a5a99, hemiGround: 0x15151c, hemiIntensity: 0.55,
-    grass: [0x1f2f1a, 0x2a3a22], mow: 0x263822, sand: 0x444038, rock: 0x3a3a40,
-    trees: null, treeCount: 0, water: false, mountains: null, city: true, lamps: true, exposure: 1.15,
+    hemiSky: 0x4a5a99, hemiGround: 0x15151c, hemiIntensity: 0.55, exposure: 1.15, env: 0.35, night: true,
   },
 };
+
+function mixHex(a, b, t) {
+  const ca = new THREE.Color(a), cb = new THREE.Color(b);
+  return ca.lerp(cb, t).getHex();
+}
+
+// Grey everything out for rain.
+function overcast(L) {
+  const g = (hex, t) => mixHex(hex, L.night ? 0x10131c : 0x7a828c, t);
+  return {
+    ...L,
+    skyTop: g(L.skyTop, 0.8), skyHorizon: g(L.skyHorizon, 0.65), skyBottom: g(L.skyBottom, 0.6),
+    fog: g(L.fog, 0.7), fogNear: L.fogNear * 0.25, fogFar: L.fogFar * (L.night ? 0.7 : 0.35),
+    sunColor: g(L.sunColor, 0.6), sunIntensity: L.sunIntensity * 0.35,
+    hemiSky: g(L.hemiSky, 0.5), hemiIntensity: L.hemiIntensity * 0.95, env: L.env * 0.8,
+  };
+}
+
+// Combine a track's scenery with a time of day and weather.
+export function makeTheme(themeName, time = 'default', rain = false) {
+  const scen = SCENERY[themeName] || SCENERY.day;
+  const timeKey = time && time !== 'default' ? time : scen.defaultTime;
+  let L = LIGHTING[timeKey];
+  if (rain) L = overcast(L);
+  return { ...scen, ...L, time: timeKey, night: !!L.night, rain, lamps: !!scen.lamps || !!L.night };
+}
 
 const rand = mulberry32(1234);
 function mulberry32(a) {
@@ -183,10 +224,11 @@ function ribbon(a, b, v, uA = 0, uB = 1) {
 }
 
 export class World {
-  constructor(renderer, track, themeName, quality = 'high') {
+  // opts: { time: 'default'|'day'|'sunset'|'night', rain: bool }
+  constructor(renderer, track, themeName, quality = 'high', opts = {}) {
     this.renderer = renderer;
     this.track = track;
-    this.theme = THEMES[themeName];
+    this.theme = makeTheme(themeName, opts.time, opts.rain);
     this.quality = quality;
     this.scene = new THREE.Scene();
     this.tex = makeTextures();
@@ -239,7 +281,7 @@ export class World {
         bottom: { value: new THREE.Color(T.skyBottom) },
         sunDir: { value: new THREE.Vector3(...T.sunDir).normalize() },
         sunColor: { value: new THREE.Color(T.sunColor) },
-        night: { value: T.city ? 1 : 0 },
+        night: { value: T.night ? 1 : 0 },
       },
       vertexShader: `varying vec3 vDir; void main(){ vDir = normalize(position); vec4 p = projectionMatrix * modelViewMatrix * vec4(position,1.0); gl_Position = p.xyww; }`,
       fragmentShader: `
@@ -281,7 +323,7 @@ export class World {
     envScene.add(ground);
     this.envMap = pm.fromScene(envScene, 0.02).texture;
     this.scene.environment = this.envMap;
-    this.scene.environmentIntensity = this.theme.city ? 0.35 : 0.9;
+    this.scene.environmentIntensity = this.theme.env;
     pm.dispose();
   }
 
@@ -365,7 +407,8 @@ export class World {
     // Asphalt.
     const road = new THREE.Mesh(
       ribbon(rows(() => hw, ROAD_Y), rows(() => -hw, ROAD_Y), vs),
-      new THREE.MeshStandardMaterial({ map: this.tex.asphalt, roughness: 0.92, metalness: 0.0, color: 0xffffff }),
+      // Wet tarmac: darker and glossy so it reflects the sky and lights.
+      new THREE.MeshStandardMaterial({ map: this.tex.asphalt, roughness: this.theme.rain ? 0.22 : 0.92, metalness: this.theme.rain ? 0.2 : 0.0, color: this.theme.rain ? 0x8c8c8c : 0xffffff }),
     );
     road.receiveShadow = true;
     this.scene.add(road);
@@ -406,7 +449,7 @@ export class World {
       }
     }
     if (kerbGeos.length) {
-      const kerb = new THREE.Mesh(mergeGeometries(kerbGeos), new THREE.MeshStandardMaterial({ map: this.tex.kerb, roughness: 0.7 }));
+      const kerb = new THREE.Mesh(mergeGeometries(kerbGeos), new THREE.MeshStandardMaterial({ map: this.tex.kerb, roughness: this.theme.rain ? 0.25 : 0.7 }));
       kerb.receiveShadow = true;
       this.scene.add(kerb);
     }
@@ -487,6 +530,10 @@ export class World {
     line.position.set(p.x, p.h + ROAD_Y + 0.01, p.z);
     line.receiveShadow = true;
     scene.add(line);
+    if (t.def.drag) {
+      this._buildDragStrip(check);
+      return;
+    }
 
     // Grid slots.
     const gridMat = new THREE.MeshBasicMaterial({ color: 0xeeeeee, polygonOffset: true, polygonOffsetFactor: -4 });
@@ -570,6 +617,174 @@ export class World {
       }
       scene.add(stand);
     }
+  }
+
+  // Drag strip furniture: Christmas tree, finish line + gantry, scoreboards,
+  // lane divider and grandstands.
+  _buildDragStrip(check) {
+    const t = this.track, scene = this.scene, hw = t.halfWidth;
+    const LANE = 4.5;
+    const flat = (geo, mat, s, d, y = ROAD_Y + 0.012) => {
+      const q = t.pointAt(s, d);
+      const m = new THREE.Mesh(geo, mat);
+      m.rotation.order = 'YXZ';
+      m.rotation.set(-Math.PI / 2, q.heading, 0);
+      m.position.set(q.x, q.h + y, q.z);
+      scene.add(m);
+      return m;
+    };
+    // Finish line + lane divider.
+    flat(new THREE.PlaneGeometry(t.def.width, 1.6), new THREE.MeshStandardMaterial({ map: check, roughness: 0.8, polygonOffset: true, polygonOffsetFactor: -4 }), QUARTER_MILE, 0, ROAD_Y + 0.01);
+    const lineMat = new THREE.MeshBasicMaterial({ color: 0xf2f2f2, polygonOffset: true, polygonOffsetFactor: -4 });
+    const dashGeo = new THREE.PlaneGeometry(0.18, 3);
+    for (let s = -20; s < QUARTER_MILE + 120; s += 6) flat(dashGeo, lineMat, s, 0);
+    const markMat = new THREE.MeshBasicMaterial({ color: 0xffd200, polygonOffset: true, polygonOffsetFactor: -4 });
+    for (const sd of [18.29, 100.58, 201.17, 304.8]) {
+      for (const side of [1, -1]) flat(new THREE.PlaneGeometry(1.2, 0.3), markMat, sd, side * (hw - 0.8));
+    }
+
+    const metal = new THREE.MeshStandardMaterial({ color: 0x2a2d33, roughness: 0.5, metalness: 0.6 });
+    const place = (obj, s, d, rotY = 0) => {
+      const q = t.pointAt(s, d);
+      obj.position.set(q.x, q.h + ROAD_Y, q.z);
+      obj.rotation.y = q.heading + rotY;
+      scene.add(obj);
+      return obj;
+    };
+
+    // Christmas tree between the lanes, facing the cars.
+    const tree = new THREE.Group();
+    const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.14, 2.4, 8), metal);
+    pole.position.y = 1.2;
+    tree.add(pole);
+    const box = new THREE.Mesh(new THREE.BoxGeometry(1.0, 2.6, 0.35), new THREE.MeshStandardMaterial({ color: 0x111114, roughness: 0.5 }));
+    box.position.y = 3.4;
+    box.castShadow = true;
+    tree.add(box);
+    const bulbGeo = new THREE.CircleGeometry(0.12, 18);
+    const bulb = (x, y, off) => {
+      const m = new THREE.MeshStandardMaterial({ color: off, emissive: 0x000000, emissiveIntensity: 3 });
+      const mesh = new THREE.Mesh(bulbGeo, m);
+      mesh.position.set(x, y, -0.18);
+      mesh.rotation.y = Math.PI;
+      tree.add(mesh);
+      return m;
+    };
+    this.tree = {};
+    // Rival in the left lane (+x local), you in the right lane (-x local).
+    for (const [key, x] of [['them', 0.25], ['you', -0.25]]) {
+      this.tree[key] = {
+        stage: [bulb(x, 4.5, 0x222222), bulb(x, 4.22, 0x222222)],
+        amber: [bulb(x, 3.85, 0x2a1a00), bulb(x, 3.5, 0x2a1a00), bulb(x, 3.15, 0x2a1a00)],
+        green: bulb(x, 2.75, 0x002a08),
+        red: bulb(x, 2.4, 0x2a0000),
+      };
+    }
+    place(tree, 9, 0);
+
+    // Finish gantry.
+    const gantry = new THREE.Group();
+    for (const side of [1, -1]) {
+      const pillar = new THREE.Mesh(new THREE.BoxGeometry(0.5, 7, 0.5), metal);
+      pillar.position.set(side * (hw + 1.2), 3.5, 0);
+      gantry.add(pillar);
+    }
+    const beam = new THREE.Mesh(new THREE.BoxGeometry(t.def.width + 3, 1.2, 0.6), metal);
+    beam.position.y = 6.6;
+    gantry.add(beam);
+    const banner = new THREE.Mesh(new THREE.PlaneGeometry(t.def.width - 2, 1.0), new THREE.MeshBasicMaterial({ map: sponsorTexture('FINISH', '#111111', '#ffd200') }));
+    banner.position.set(0, 6.6, -0.31);
+    banner.rotation.y = Math.PI;
+    gantry.add(banner);
+    place(gantry, QUARTER_MILE, 0);
+    const start = new THREE.Group();
+    for (const side of [1, -1]) {
+      const pillar = new THREE.Mesh(new THREE.BoxGeometry(0.5, 7, 0.5), metal);
+      pillar.position.set(side * (hw + 1.2), 3.5, 0);
+      start.add(pillar);
+    }
+    const sbeam = new THREE.Mesh(new THREE.BoxGeometry(t.def.width + 3, 1.2, 0.6), metal);
+    sbeam.position.y = 6.6;
+    start.add(sbeam);
+    const sb = new THREE.Mesh(new THREE.PlaneGeometry(t.def.width - 2, 1.0), new THREE.MeshBasicMaterial({ map: sponsorTexture('THUNDER VALLEY', '#d61f26', '#ffffff') }));
+    sb.position.set(0, 6.6, -0.31);
+    sb.rotation.y = Math.PI;
+    start.add(sb);
+    place(start, -6, 0);
+
+    // Scoreboards past the finish line (visible as you brake).
+    this.boards = {};
+    for (const [key, side] of [['them', 1], ['you', -1]]) {
+      const c = document.createElement('canvas');
+      c.width = 512; c.height = 256;
+      const tex = new THREE.CanvasTexture(c);
+      tex.colorSpace = THREE.SRGBColorSpace;
+      const g = new THREE.Group();
+      const board = new THREE.Mesh(new THREE.PlaneGeometry(7, 3.5), new THREE.MeshBasicMaterial({ map: tex }));
+      board.position.y = 5;
+      board.rotation.y = Math.PI;
+      g.add(board);
+      const back = new THREE.Mesh(new THREE.BoxGeometry(7.4, 3.9, 0.3), metal);
+      back.position.set(0, 5, 0.2);
+      g.add(back);
+      const leg = new THREE.Mesh(new THREE.BoxGeometry(0.4, 3.2, 0.4), metal);
+      leg.position.y = 1.6;
+      g.add(leg);
+      place(g, QUARTER_MILE + 70, side * (hw + 5));
+      this.boards[key] = { ctx: c.getContext('2d'), tex };
+      this.setScoreboard(key, key === 'you' ? 'YOU' : 'RIVAL', null, null);
+    }
+
+    // Grandstands.
+    const standMat = new THREE.MeshStandardMaterial({ map: this.tex.crowd, roughness: 0.9 });
+    for (const [s0, side] of [[70, 1], [70, -1], [230, 1], [230, -1]]) {
+      const g = new THREE.Group();
+      for (let r = 0; r < 6; r++) {
+        const step = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.9 + r * 0.9, 60), standMat);
+        step.position.set(side * (r * 1.4 + 0.7), (0.9 + r * 0.9) / 2, 0);
+        step.castShadow = true;
+        g.add(step);
+      }
+      place(g, s0, side * (t.wallDist + 4));
+    }
+  }
+
+  // Christmas tree state: { staged, ambers (0-3), green, redYou, redThem }
+  setTree(st) {
+    if (!this.tree) return;
+    for (const key of ['you', 'them']) {
+      const L = this.tree[key];
+      const on = (m, hex, lit) => {
+        m.emissive.setHex(lit ? hex : 0x000000);
+        m.color.setHex(lit ? hex : 0x222222);
+      };
+      L.stage.forEach((m) => on(m, 0xfff2c0, st.staged));
+      L.amber.forEach((m, i) => on(m, 0xffa000, st.ambers > i && !st.green));
+      on(L.green, 0x22ff55, st.green && !(key === 'you' ? st.redYou : st.redThem));
+      on(L.red, 0xff1a1a, key === 'you' ? st.redYou : st.redThem);
+    }
+  }
+
+  setScoreboard(key, name, et, mph, win = false) {
+    const b = this.boards?.[key];
+    if (!b) return;
+    const g = b.ctx;
+    g.fillStyle = '#050608';
+    g.fillRect(0, 0, 512, 256);
+    g.strokeStyle = win ? '#22ff55' : '#333';
+    g.lineWidth = 8;
+    g.strokeRect(4, 4, 504, 248);
+    g.fillStyle = win ? '#22ff55' : '#ffd200';
+    g.font = 'bold 44px monospace';
+    g.textAlign = 'center';
+    g.fillText(name.toUpperCase().slice(0, 18), 256, 62);
+    g.fillStyle = '#ff3b30';
+    g.font = 'bold 92px monospace';
+    g.fillText(et ? et.toFixed(3) : '-.---', 256, 160);
+    g.fillStyle = '#e8f0ff';
+    g.font = 'bold 44px monospace';
+    g.fillText(mph ? `${mph.toFixed(1)} MPH` : '--- MPH', 256, 225);
+    b.tex.needsUpdate = true;
   }
 
   _buildBrakeBoards() {
@@ -734,7 +949,8 @@ export class World {
     const armGeo = new THREE.BoxGeometry(2.6, 0.15, 0.2); armGeo.translate(-1.3, 9, 0);
     const headGeo = new THREE.BoxGeometry(1.0, 0.18, 0.45); headGeo.translate(-2.4, 8.88, 0);
     const poleMat = new THREE.MeshStandardMaterial({ color: 0x55585e, roughness: 0.6, metalness: 0.5 });
-    const headMat = new THREE.MeshStandardMaterial({ color: 0xfff1cc, emissive: 0xffd89a, emissiveIntensity: 4 });
+    const lit = this.theme.night;
+    const headMat = new THREE.MeshStandardMaterial({ color: 0xfff1cc, emissive: 0xffd89a, emissiveIntensity: lit ? 4 : 0 });
     const poolTex = canvasTexture(128, 128, (g, w, h) => {
       const grd = g.createRadialGradient(w / 2, h / 2, 0, w / 2, h / 2, w / 2);
       grd.addColorStop(0, 'rgba(255,220,160,0.75)');
@@ -764,7 +980,8 @@ export class World {
       pools.setMatrixAt(i, m);
     });
     poles.castShadow = true;
-    this.scene.add(poles, arms, heads, pools);
+    this.scene.add(poles, arms, heads);
+    if (lit) this.scene.add(pools); // light pools only when the lamps are on
   }
 
   _buildCity() {
@@ -785,7 +1002,7 @@ export class World {
     const pts = this._scatter(this.quality === 'low' ? 220 : 420, t.wallDist + 12, (x, z, info) => info.d < 260);
     const geo = new THREE.BoxGeometry(1, 1, 1);
     geo.translate(0, 0.5, 0);
-    const mat = new THREE.MeshStandardMaterial({ color: 0x15171f, roughness: 0.8, emissive: 0xffffff, emissiveMap: winTex, emissiveIntensity: 1.6, map: winTex });
+    const mat = new THREE.MeshStandardMaterial({ color: 0x15171f, roughness: 0.8, emissive: 0xffffff, emissiveMap: winTex, emissiveIntensity: this.theme.night ? 1.6 : 0.08, map: winTex });
     const im = new THREE.InstancedMesh(geo, mat, pts.length);
     const m = new THREE.Matrix4(), q = new THREE.Quaternion(), s = new THREE.Vector3(), p = new THREE.Vector3();
     pts.forEach((pt, i) => {

@@ -5,6 +5,42 @@
 
 export const CARS = [
   {
+    id: 'junker',
+    name: 'Rust Bucket',
+    blurb: 'What you drive when you have lost everything. It runs. Mostly.',
+    style: 'coupe',
+    color: 0x8a6f5a,
+    price: 0,
+    tier: 0,
+    junker: true,
+    mass: 1250,
+    inertia: 1950,
+    a: 1.15,
+    b: 1.30,
+    track: 1.5,
+    cgHeight: 0.52,
+    wheelRadius: 0.3,
+    mu: 0.98,
+    frontGrip: 1.0,
+    rearGrip: 1.1,
+    cdA: 0.72,
+    clA: 0,
+    aeroFront: 0.5,
+    brakeForce: 11500,
+    brakeBias: 0.66,
+    maxSteer: 0.6,
+    idle: 800,
+    redline: 6000,
+    limiter: 6200,
+    engineInertia: 0.22,
+    clutchTorque: 380,
+    torque: [[0, 120], [1000, 150], [2000, 180], [3000, 200], [4000, 205], [5000, 195], [6000, 170], [6800, 140]],
+    gears: [-3.4, 3.5, 2.1, 1.45, 1.1, 0.9, 0.78],
+    final: 4.0,
+    cylinders: 4,
+    stats: { power: 0.15, grip: 0.3, weight: 0.5 },
+  },
+  {
     id: 'rookie',
     name: 'Rookie Coupe',
     blurb: 'Your first car. Light, honest and slow enough to learn the shifter on.',
@@ -219,7 +255,10 @@ export const CARS = [
 ];
 
 export function findCar(id) {
-  return CARS.find((c) => c.id === id) || CARS[0];
+  return CARS.find((c) => c.id === id) || CARS.find((c) => c.id === 'rookie');
 }
 
-export const PAINT_COLORS = [0xd61f26, 0x1fa2ff, 0xf2b705, 0x22c55e, 0xf97316, 0xa855f7, 0xf5f5f5, 0x1b1b1f, 0xec4899, 0x14b8a6];
+// Cars you can buy at the dealership.
+export const DEALER_CARS = CARS.filter((c) => !c.junker && !c.modOnly);
+
+export const PAINT_COLORS = [0xd61f26, 0x1fa2ff, 0xf2b705, 0x22c55e, 0xf97316, 0xa855f7, 0xf5f5f5, 0x1b1b1f, 0xec4899, 0x14b8a6, 0x8a6f5a];

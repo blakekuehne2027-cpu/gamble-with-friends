@@ -179,7 +179,7 @@ export class CarPhysics {
             if (lower < downAt) doShift(this.gear - 1);
           }
           // Hold brake at a standstill to engage reverse.
-          if (this.gear === 1 && this.u < 0.5 && ctl.brake > 0.3 && ctl.throttle < 0.05) {
+          if (this.gear === 1 && this.u < 0.5 && ctl.brake > 0.3 && ctl.throttle < 0.05 && !ctl.noAutoReverse) {
             this.autoRevTimer += dt;
             if (this.autoRevTimer > 0.45) { doShift(-1); this.autoRevTimer = 0; }
           } else this.autoRevTimer = 0;
@@ -235,6 +235,7 @@ export class CarPhysics {
     if (rpm > s.limiter) this.limiterCut = true;
     else if (rpm < s.limiter - 250) this.limiterCut = false;
     if (this.limiterCut || this.shiftCut || !this.engineOn) throttle = 0;
+    if (this.launchControl && rpm > s.redline * 0.58) throttle = 0;
     if (inp.tc) throttle *= this.tcCut;
     if (inp.stability && this.stabilityCut !== undefined) throttle *= this.stabilityCut;
     // Idle controller keeps the engine alive.
@@ -269,6 +270,13 @@ export class CarPhysics {
       e = Math.min(e, this.clutchRamp);
     }
     if (inp.handbrake) e = 0;
+    // Launch control: brake + throttle at a standstill holds the auto clutch
+    // open and lets the engine rev to its launch rpm.
+    this.launchControl = false;
+    if (this.gear > 0 && inp.autoClutch && inp.brake > 0.5 && inp.throttle > 0.5 && absU < 0.5) {
+      e = 0;
+      this.launchControl = true;
+    }
     if (this.gear !== 0 && inp.autoClutch) {
       // Launch: the auto clutch slips until the engine is near its torque band.
       const wheelRpm = Math.abs(Gr * u) * RPM;
@@ -404,6 +412,12 @@ export class CarPhysics {
       this.v += (0 - this.v) * k;
     }
     if (Math.abs(this.u) < 0.02 && throttle < 0.05 && Fdrive === 0) this.u *= 0.5;
+    // Static hold: brakes stronger than the drive force keep a stopped car
+    // planted (e.g. brake-torquing on the drag strip start line).
+    const holdCap = Fb + (inp.handbrake ? muR * Nr * 0.85 : 0);
+    if (holdCap > 50 && Math.abs(this.u) < 0.3 && holdCap > Math.abs(Fdrive + gradeF)) {
+      this.u = 0;
+    }
 
     this.psi += this.r * h;
     const sp = Math.sin(this.psi), cp = Math.cos(this.psi);

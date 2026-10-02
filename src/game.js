@@ -1,26 +1,23 @@
 // Race session: player car, AI, laps, collisions, cameras, FFB, audio and HUD.
 
 import * as THREE from 'three';
-import { Track, TRACKS } from './track.js';
+import { TRACKS, getTrack } from './track.js';
 import { findCar, PAINT_COLORS } from './cars.js';
 import { CarPhysics, SURFACES } from './physics.js';
 import { World, ROAD_Y } from './world.js';
 import { CarModel } from './carModel.js';
-import { Particles, SkidMarks } from './effects.js';
+import { Particles, SkidMarks, Rain } from './effects.js';
 import { AIDriver } from './ai.js';
 import { loadJSON, saveJSON } from './settings.js';
 import { fmtTime } from './hud.js';
 import { buildSpec, raceReward, lapReward, saveCareer, modsActive } from './career.js';
+import { DragRace, LANE } from './drag.js';
+import { JobRunner } from './jobs.js';
 
 const STEP = 1 / 240;
 const CAMERAS = ['cockpit', 'hood', 'chase', 'far'];
 const CAMERA_NAMES = { cockpit: 'COCKPIT', hood: 'BONNET', chase: 'CHASE', far: 'FAR CHASE' };
-const trackCache = new Map();
-
-export function getTrack(i) {
-  if (!trackCache.has(i)) trackCache.set(i, new Track(TRACKS[i]));
-  return trackCache.get(i);
-}
+export { getTrack };
 
 const wrapPi = (a) => {
   while (a > Math.PI) a -= Math.PI * 2;
@@ -56,9 +53,11 @@ export class Game {
     const S = this.settings;
     const track = (this.track = getTrack(cfg.track));
     const def = TRACKS[cfg.track];
-    this.world = new World(this.renderer, track, def.theme, S.graphics);
+    this.world = new World(this.renderer, track, def.theme, S.graphics, { time: cfg.time, rain: cfg.rain });
     this.scene = this.world.scene;
-    this.night = def.theme === 'night';
+    this.night = this.world.theme.night;
+    this.rain = !!cfg.rain;
+    this.wet = this.rain ? 0.78 : 1; // tyre grip multiplier in the rain
     this.renderer.toneMappingExposure = this.world.theme.exposure;
 
     // Player: base car + bought upgrades + active mods.
@@ -80,24 +79,27 @@ export class Game {
 
     this.particles = new Particles(this.scene);
     this.skids = new SkidMarks(this.scene);
+    this.rainFx = this.rain ? new Rain(this.scene, S.graphics === 'low' ? 2500 : 5000, this.night) : null;
 
-    // Grid: player at the back in a race, alone in time trial.
+    // Grid: player at the back in a race, alone in time trial, right lane on the drag strip.
     this.ais = [];
     const race = cfg.mode === 'race';
+    const drag = cfg.mode === 'drag';
     const n = race ? cfg.opponents : 0;
     const slot = (i) => ({ s: -12 - i * 9, d: i % 2 ? -2.6 : 2.6 });
     for (let i = 0; i < n; i++) {
       const g = slot(i);
-      const ai = new AIDriver(track, i, g.s, g.d, cfg.difficulty, { tier: base.tier, speed: this.mods.aiSpeed });
+      const ai = new AIDriver(track, i, g.s, g.d, cfg.difficulty, { tier: base.tier, speed: this.mods.aiSpeed * (this.rain ? 0.9 : 1) });
       const model = new CarModel(ai.spec, ai.color, { number: ai.number, helmet: [0xffffff, 0xff3b30, 0x34c759, 0x0a84ff][i % 4] });
       ai.model = model;
       this.scene.add(model.root);
       this.ais.push(ai);
     }
-    const ps = race ? slot(n) : { s: -40, d: 0 };
+    const ps = race ? slot(n) : drag ? { s: -2.4, d: -LANE } : { s: -40, d: 0 };
     const p = track.pointAt(ps.s, ps.d);
     this.car.reset(p.x, p.z, p.heading);
-    this.car.gear = S.transmission === 'h' ? 0 : 1;
+    // Without a mapped shifter the H-pattern setting falls back to sequential, so start in 1st.
+    this.car.gear = S.transmission === 'h' && this.input.shifterMapped() ? 0 : 1;
     this.prog = ps.s;
     this.lastS = track.wrapS(ps.s);
     this.hint = p.i;
@@ -107,7 +109,7 @@ export class Game {
     // Session state.
     this.time = 0;
     this.raceStartTime = 0;
-    this.state = race ? 'countdown' : 'running';
+    this.state = race ? 'countdown' : drag ? 'drag' : 'running';
     this.countdown = 0;
     this.lightsOutAt = 3.6 + 0.6 * 5 + Math.random() * 1.2; // seconds since start
     this.lapsDone = 0;
@@ -148,11 +150,11 @@ export class Game {
 
     // Time-trial ghost.
     this.ghostKey = `redline.ghost.${def.id}.${base.id}`;
-    this.ghostBest = race ? null : loadJSON(this.ghostKey, null);
+    this.ghostBest = cfg.mode === 'tt' ? loadJSON(this.ghostKey, null) : null;
     if (this.ghostBest) this.bestLap = this.ghostBest.time;
     this.ghostRec = null;
     this.ghostModel = null;
-    if (!race) {
+    if (cfg.mode === 'tt') {
       this.ghostModel = new CarModel(spec, 0x9fd4ff, { number: 0 });
       this.ghostModel.root.traverse((o) => {
         if (o.material) {
@@ -167,14 +169,35 @@ export class Game {
       this.scene.add(this.ghostModel.root);
     }
 
+    // Drag run: rival, tree and timing live in DragRace.
+    this.drag = drag ? new DragRace(this, cfg) : null;
+    if (this.drag) {
+      this.dragRival = new CarModel(this.drag.rivalSpec, cfg.opp.color, { number: 7, helmet: 0xff3b30, glow: this.drag.rivalSpec.glow ?? null });
+      this.scene.add(this.dragRival.root);
+      this.world.setScoreboard('them', cfg.opp.name, null, null);
+      this.world.setScoreboard('you', 'YOU', null, null);
+    }
+
+    // Job: objectives, timers and pay live in JobRunner.
+    this.job = cfg.mode === 'job' ? new JobRunner(this, cfg.job) : null;
+    this.beacon = null;
+    if (this.job && (cfg.job.dist || cfg.job.trapS !== undefined)) {
+      const mat = new THREE.MeshBasicMaterial({ color: cfg.job.type === 'radar' ? 0xff3b30 : 0x22d3ee, transparent: true, opacity: 0.35, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide });
+      this.beacon = new THREE.Mesh(new THREE.CylinderGeometry(1.2, 1.2, 160, 16, 1, true), mat);
+      this.beacon.visible = false;
+      this.scene.add(this.beacon);
+    }
+    this.lastImpact = 0;
+
     this.hud.setTrack(track);
-    this.hud.setMode({ race, laps: cfg.laps, units: S.units, cars: n + 1 });
+    this.hud.setMode({ race, laps: cfg.laps, units: S.units, cars: n + 1, drag, job: !!this.job });
     this.hud.setTelemetryVisible(S.showTelemetry);
     this.hud.setLights(0, false, race);
     this.hud.setNitro(spec.nitro > 0 ? 1 : -1);
     this.hud.setModsBadge(modsActive(this.mods));
     this.world.setStartLights(0);
-    if (!race) this.hud.message('TIME TRIAL', 2.5);
+    if (cfg.mode === 'tt') this.hud.message('TIME TRIAL', 2.5);
+    if (cfg.mode === 'job') this.hud.message(cfg.job.name.toUpperCase(), 2.5);
 
     this.audio.setPlayerCar(spec);
     this.model.setCockpitVisible(CAMERAS[this.camIndex] === 'cockpit');
@@ -191,6 +214,10 @@ export class Game {
     this.audio.update({ paused: true });
     if (this.world) this.world.dispose();
     this.model?.dispose();
+    this.dragRival?.dispose();
+    this.dragRival = null;
+    this.drag = null;
+    this.job = null;
     for (const a of this.ais || []) a.model.dispose();
     this.world = null;
     this.scene = null;
@@ -267,7 +294,7 @@ export class Game {
 
     const ev = car.updateTransmission(dt, {
       mode, hGear: inp.hGear ?? 0, shiftUp: inp.pressed.shiftUp, shiftDown: inp.pressed.shiftDown,
-      clutch: inp.clutch, throttle, brake, autoClutch,
+      clutch: inp.clutch, throttle, brake, autoClutch, noAutoReverse: !!this.drag && this.drag.you.left === null,
     });
     for (const e of ev) {
       if (e === 'shift') this.audio.shift();
@@ -308,6 +335,15 @@ export class Game {
     if (!this.mods.ghost) this._collideCars(dt);
     this._progress(dt);
     this._scoring(dt);
+    if (this.drag) this._updateDrag(dt);
+    if (this.job) {
+      this.job.update(dt);
+      const tp = this.job.target();
+      if (this.beacon && tp) {
+        this.beacon.visible = true;
+        this.beacon.position.set(tp.x, tp.h + 80, tp.z);
+      }
+    }
 
     // AI.
     const racing = this.state === 'racing' || this.state === 'finished';
@@ -326,10 +362,14 @@ export class Game {
     this._updateHUD(dt, inp, mode, autoClutch);
     if (this.ghostModel) this._updateGhost(dt);
     this.world.update(this._v.set(car.x, this.carY, car.z), this.camera);
+    if (this.rainFx) {
+      const sp = Math.sin(car.psi), cp = Math.cos(car.psi);
+      this.rainFx.update(dt, this.camera.position, car.u * sp + car.v * cp, car.u * cp - car.v * sp);
+    }
 
-    if (this.state === 'finished' && !this.resultsShown && this.time - this.finishedAt > 4) {
+    if (this.state === 'finished' && !this.resultsShown && this.time - this.finishedAt > (this.drag ? 1.5 : 4)) {
       this.resultsShown = true;
-      this.onFinish?.(this._results());
+      this.onFinish?.(this.drag ? this._dragResults() : this.job ? this._jobResults() : this._results());
     }
     this.prevThrottle = throttle;
   }
@@ -361,6 +401,51 @@ export class Game {
       this.hud.message('GO!', 1.2, 'go');
       setTimeout(() => this.active && this.hud.setLights(0, false, false), 1500);
     }
+  }
+
+  _updateDrag(dt) {
+    const d = this.drag;
+    d.update(dt);
+    const st = d.hudState();
+    this.world.setTree({ staged: d.phase !== 'staging' || d.t > 0.3, ambers: st.ambers, green: st.green, redYou: st.redYou, redThem: st.redThem });
+    this.hud.dragUpdate(st);
+    // Rival model.
+    const r = d.rival, m = this.dragRival;
+    const p = this.track.project(r.x, r.z, -1, this._rivalProj || (this._rivalProj = {}));
+    m.root.position.set(r.x, p.h + ROAD_Y, r.z);
+    m.root.rotation.set(0, r.psi, 0, 'YXZ');
+    this._rivalSpin = (this._rivalSpin || 0) + (r.u / r.spec.wheelRadius) * dt;
+    m.update(dt, { steerRoad: r.delta, spinFront: this._rivalSpin, spinRear: r.wheelRot, braking: r.u > 1 && d.them.finishT !== null, pitch: -r.ax * 0.003, roll: 0, lights: this.night });
+    m.setNitro(false, this.time);
+    // Scoreboards light up as each car finishes.
+    for (const key of ['you', 'them']) {
+      const lane = d[key];
+      if (lane.finishT !== null && !lane._shown) {
+        lane._shown = true;
+        this.world.setScoreboard(key, key === 'you' ? 'YOU' : d.opp.name, lane.splits['1/4 mile'], lane.speeds['1/4 mile']);
+      }
+    }
+    // Rival tyre smoke at the launch.
+    if (Math.abs(r.rearSpin) > 2 && Math.random() < 0.6) {
+      const sp = Math.sin(r.psi), cp = Math.cos(r.psi);
+      this.particles.smoke(r.x - sp * 1.4, p.h + ROAD_Y, r.z - cp * 1.4, r.u * sp, r.u * cp, 0.8, this.night);
+    }
+  }
+
+  _jobResults() {
+    const res = this.job.results(this.career);
+    saveCareer(this.career);
+    return res;
+  }
+
+  _dragResults() {
+    const res = this.drag.results(this.career, this.settings);
+    saveCareer(this.career);
+    if (res.win) {
+      const lane = this.drag.you;
+      this.world.setScoreboard('you', 'WINNER', lane.splits['1/4 mile'] ?? null, lane.speeds['1/4 mile'] ?? null, true);
+    }
+    return res;
   }
 
   // Drift combos, overtakes and top speed (paid out at the end of the race).
@@ -415,7 +500,7 @@ export class Game {
     this.hud.setModsBadge(modsActive(this.mods));
     this.model.setGlow(this._glowColor());
     if (!this.mods.rainbow) this.model.setColor(this.paintHex);
-    for (const ai of this.ais) ai.setSpeed(this.mods.aiSpeed);
+    for (const ai of this.ais) ai.setSpeed(this.mods.aiSpeed * (this.rain ? 0.9 : 1));
   }
 
   _glowColor() {
@@ -459,7 +544,7 @@ export class Game {
     const slope = c.grade * Math.cos(car.psi - c.heading);
     this.onGrass = grass;
     this.onKerb = kerb;
-    return { mu, drag, slope, kerb, grass };
+    return { mu: mu * this.wet, drag, slope, kerb, grass };
   }
 
   _corners() {
@@ -500,6 +585,7 @@ export class Game {
         }
       }
     }
+    this.lastImpact = worst;
     if (worst > 2) this._wallHit = true;
     if (worst > 0.8) {
       this.audio.hit(worst / 12);
@@ -576,6 +662,7 @@ export class Game {
   }
 
   _progress() {
+    if (this.drag) return; // drag runs are timed by DragRace
     const t = this.track, L = t.length;
     const s = this.trackPos.s;
     let ds = s - this.lastS;
@@ -606,7 +693,9 @@ export class Game {
       const best = lapTime < this.bestLap;
       if (best) this.bestLap = lapTime;
       this.hud.cash(`SPEED TRAP ${Math.round(this.settings.units === 'mph' ? this.car.speed * 2.23694 : this.car.speed * 3.6)} ${this.settings.units === 'mph' ? 'MPH' : 'KM/H'}`);
-      if (this.cfg.mode !== 'race') {
+      if (this.cfg.mode === 'job') {
+        this.hud.message(fmtTime(lapTime), 2.5);
+      } else if (this.cfg.mode !== 'race') {
         this._finishGhostLap(lapTime, best);
         this.hud.message(fmtTime(lapTime), 3, best ? 'go' : '');
         if (best) this.hud.sub('NEW PERSONAL BEST!', 3);
@@ -829,11 +918,24 @@ export class Game {
         if (car.speed > 3 && Math.random() < 0.5) this.particles.dirt(x, this.carY, z, car.u * sp, car.u * cp);
         mark = 0;
       }
-      this.skids.add('p' + i, x, this.carY + 0.012, z, lx, lz, Math.min(1, mark));
-      if (!front && mark > 0.25 && Math.random() < 0.3 + mark * 0.7) {
+      // No rubber marks on a wet road; the tyres throw up spray instead.
+      this.skids.add('p' + i, x, this.carY + 0.012, z, lx, lz, this.rain ? 0 : Math.min(1, mark));
+      if (!front && !this.rain && mark > 0.25 && Math.random() < 0.3 + mark * 0.7) {
         this.particles.smoke(x, this.carY, z, car.u * sp, car.u * cp, mark, this.night);
       }
+      if (!front && this.rain && car.speed > 8 && surf !== 'grass' && Math.random() < Math.min(0.9, car.speed / 40)) {
+        this.particles.spray(x - sp * 0.4, this.carY, z - cp * 0.4, car.u * sp, car.u * cp, this.night);
+      }
     });
+    if (this.rain) {
+      // AI cars near the camera spray too.
+      for (const ai of this.ais) {
+        if (ai.v < 10 || Math.hypot(ai.x - car.x, ai.z - car.z) > 90 || Math.random() > 0.6) continue;
+        const asp = Math.sin(ai.psi), acp = Math.cos(ai.psi);
+        const bx = ai.x - asp * 1.6, bz = ai.z - acp * 1.6;
+        this.particles.spray(bx, ai.h + ROAD_Y, bz, ai.v * asp, ai.v * acp, this.night);
+      }
+    }
     this.skids.flush();
     this.particles.update(dt);
   }
@@ -851,7 +953,7 @@ export class Game {
     this.audio.update({
       rpm: car.rpm, throttle: car.throttleEff, engineOn: car.engineOn, speed: car.speed,
       slip: car.slipAmount, onAsphalt: !this.onGrass, kerb: this.onKerb && car.speed > 3, grass: this.onGrass,
-      aiDist: nearest, aiRpm: nearRpm, popChance: this.popTimer > 0 ? 0.14 : 0, nitro: this.nitroOn,
+      aiDist: nearest, aiRpm: nearRpm, popChance: this.popTimer > 0 ? 0.14 : 0, nitro: this.nitroOn, rain: this.rain,
     });
   }
 
@@ -935,7 +1037,8 @@ export class Game {
       this.hud.drawMap(cars);
     }
     // Stuck hint.
-    if (this.state !== 'countdown' && car.speed < 1 && inp.throttle > 0.5) this.stuckTimer += dt; else this.stuckTimer = 0;
+    const staged = this.drag && this.drag.you.left === null;
+    if (this.state !== 'countdown' && !staged && car.speed < 1 && inp.throttle > 0.5) this.stuckTimer += dt; else this.stuckTimer = 0;
     if (this.stuckTimer > 3) { this.stuckTimer = 0; this.hud.sub(car.gear === 0 ? 'You are in NEUTRAL - select a gear' : 'Stuck? Press RESET', 2.5); }
   }
 

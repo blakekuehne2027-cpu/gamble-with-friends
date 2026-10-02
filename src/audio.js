@@ -133,6 +133,8 @@ export class AudioSystem {
     this.rumble = loop('lowpass', 140, 1);
     this.gravel = loop('bandpass', 2400, 0.7);
     this.hiss = loop('highpass', 2600, 0.7);
+    this.rainLoop = loop('lowpass', 3200, 0.4);
+    this.splash = loop('bandpass', 900, 0.6);
     this.enabled = true;
   }
 
@@ -157,11 +159,11 @@ export class AudioSystem {
     if (s.paused) {
       this.player.silence();
       this.ai?.silence();
-      for (const n of [this.squeal, this.squeal2, this.wind, this.rumble, this.gravel, this.hiss]) n.g.gain.setTargetAtTime(0, t, 0.05);
+      for (const n of [this.squeal, this.squeal2, this.wind, this.rumble, this.gravel, this.hiss, this.rainLoop, this.splash]) n.g.gain.setTargetAtTime(0, t, 0.05);
       return;
     }
     this.player.update(s.rpm, s.engineOn ? s.throttle : 0, s.engineOn ? 1 : 0);
-    const sq = Math.min(1, Math.max(0, (s.slip - 1.5) / 8)) * (s.onAsphalt ? 1 : 0.15);
+    const sq = Math.min(1, Math.max(0, (s.slip - 1.5) / 8)) * (s.onAsphalt ? 1 : 0.15) * (s.rain ? 0.3 : 1);
     this.squeal.g.gain.setTargetAtTime(sq * 0.22, t, 0.04);
     this.squeal2.g.gain.setTargetAtTime(sq * 0.1, t, 0.04);
     this.squeal.f.frequency.setTargetAtTime(950 + sq * 300 + Math.random() * 60, t, 0.05);
@@ -171,6 +173,8 @@ export class AudioSystem {
     this.rumble.g.gain.setTargetAtTime((s.kerb ? 0.7 : 0) + (s.grass ? 0.35 : 0) * Math.min(1, s.speed / 10), t, 0.03);
     this.gravel.g.gain.setTargetAtTime(s.grass ? Math.min(0.12, s.speed / 150) : 0, t, 0.05);
     this.hiss.g.gain.setTargetAtTime(s.nitro ? 0.13 : 0, t, s.nitro ? 0.03 : 0.15);
+    this.rainLoop.g.gain.setTargetAtTime(s.rain ? 0.1 : 0, t, 0.3);
+    this.splash.g.gain.setTargetAtTime(s.rain ? Math.min(0.22, s.speed / 160) : 0, t, 0.1);
     if (this.ai) {
       if (s.aiDist !== undefined && s.aiDist < 120) {
         const vol = Math.max(0, 1 - s.aiDist / 120) ** 2 * 0.6;

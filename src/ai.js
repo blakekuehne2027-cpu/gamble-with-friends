@@ -19,7 +19,7 @@ export class AIDriver {
     this.color = COLORS[idx % COLORS.length];
     this.number = 2 + idx * 3 + (idx % 3);
     const tier = opts.tier ?? 2;
-    let pool = CARS.filter((c) => !c.modOnly && c.tier <= tier && c.tier >= tier - 1);
+    let pool = CARS.filter((c) => !c.modOnly && (!c.junker || tier === 0) && c.tier <= tier && c.tier >= tier - 1);
     if (!pool.length) pool = CARS.filter((c) => !c.modOnly);
     this.spec = pool[(idx + 1) % pool.length];
     // Each driver has their own pace & style.
