@@ -139,14 +139,6 @@ export function settle(career, settings, res) {
       lines.push(['Bet lost', -bet]);
     }
   }
-  if (win) {
-    const purse = 300;
-    career.money += purse;
-    lines.push(['Winner\'s purse', purse]);
-  }
-  career.stats.dragRuns = (career.stats.dragRuns || 0) + 1;
-  if (win) career.stats.dragWins = (career.stats.dragWins || 0) + 1;
-  if (res.you.et && (!career.stats.bestEt || res.you.et < career.stats.bestEt)) career.stats.bestEt = res.you.et;
   return lines;
 }
 
@@ -351,6 +343,14 @@ export class DragRace {
       shifts: this.shifts, story: this.cfg.story || null,
     };
     res.lines = settle(career, settings, res);
+    if (win) {
+      career.money += 300;
+      res.lines.push(['Winner\'s purse', 300]);
+    }
+    const st = career.stats;
+    st.dragRuns = (st.dragRuns || 0) + 1;
+    if (win) st.dragWins = (st.dragWins || 0) + 1;
+    if (res.you.et && !res.you.foul && (!st.bestEt || res.you.et < st.bestEt)) st.bestEt = res.you.et;
     res.balance = career.money;
     this.settled = res;
     return res;

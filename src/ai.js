@@ -1,7 +1,8 @@
 // AI opponents: they ride the racing line with a speed profile built for
 // their car, overtake around slower traffic and react to contact.
 
-import { CARS } from './cars.js';
+import { CARS, findCar } from './cars.js';
+import { buildSpec } from './career.js';
 
 const NAMES = ['M. Rossi', 'K. Tanaka', 'L. Moreau', 'S. Novak', 'D. Okafor', 'A. Lindqvist', 'J. Alvarez', 'R. Kowalski', 'E. Brennan', 'T. Haddad'];
 const COLORS = [0x1fa2ff, 0xf2b705, 0x22c55e, 0xf97316, 0xa855f7, 0xf5f5f5, 0xec4899, 0x14b8a6, 0x1b1b1f, 0x84cc16];
@@ -11,7 +12,8 @@ const PACE = [0.82, 0.885, 0.935, 0.975];
 
 export class AIDriver {
   // opts.tier: the player's car class (rivals come from the same or one class
-  // below). opts.speed: mod-menu AI speed multiplier.
+  // below). opts.speed: mod-menu AI speed multiplier. opts.rival: a named
+  // story rival { name, color, carId, up, pace } overriding the defaults.
   constructor(track, idx, startS, startD, difficulty, opts = {}) {
     this.track = track;
     this.index = idx;
@@ -22,8 +24,16 @@ export class AIDriver {
     let pool = CARS.filter((c) => !c.modOnly && (!c.junker || tier === 0) && c.tier <= tier && c.tier >= tier - 1);
     if (!pool.length) pool = CARS.filter((c) => !c.modOnly);
     this.spec = pool[(idx + 1) % pool.length];
+    const rv = opts.rival;
+    if (rv) {
+      this.spec = buildSpec(findCar(rv.carId), rv.up || {});
+      this.name = rv.name;
+      this.color = rv.color;
+      this.number = rv.number || 13;
+      this.rival = rv;
+    }
     // Each driver has their own pace & style.
-    const base = PACE[difficulty] ?? PACE[1];
+    const base = rv?.pace ?? PACE[difficulty] ?? PACE[1];
     this.baseSkill = base * (0.975 + ((idx * 37) % 10) / 200);
     this.skill = this.baseSkill * (opts.speed || 1);
     this.aggression = 0.4 + ((idx * 53) % 10) / 16;

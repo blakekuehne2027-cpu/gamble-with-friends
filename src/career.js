@@ -5,6 +5,7 @@ import { CARS, findCar, PAINT_COLORS } from './cars.js';
 import { loadJSON, saveJSON } from './settings.js';
 
 const CAREER_KEY = 'redline.career.v1';
+const STORY_KEY = 'redline.story.v1';
 const MODS_KEY = 'redline.mods.v1';
 export const START_MONEY = 5000;
 
@@ -38,14 +39,28 @@ const carValue = (car) => Math.max(15000, car.price || 0);
 // ---------------------------------------------------------------- career
 export function newCareer() {
   return {
+    profile: 'free',
     money: START_MONEY,
     owned: { rookie: { up: {}, color: PAINT_COLORS.indexOf(findCar('rookie').color) } },
     stats: { races: 0, wins: 0, podiums: 0, earned: 0, bestPayout: 0, drift: 0, overtakes: 0, topSpeed: 0 },
   };
 }
 
+// Story mode starts from nothing: a Rust Bucket and $500.
+export function newStoryCareer() {
+  return {
+    ...newCareer(),
+    profile: 'story',
+    money: 500,
+    owned: { junker: { up: {}, color: 10 } },
+    carId: 'junker',
+    story: { chapter: 0, done: {}, seen: {}, finished: false },
+  };
+}
+
 export function loadCareer() {
   const c = loadJSON(CAREER_KEY, null) || newCareer();
+  c.profile = 'free';
   c.owned = c.owned || {};
   if (!c.owned.rookie) c.owned.rookie = { up: {}, color: 3 };
   c.stats = { ...newCareer().stats, ...(c.stats || {}) };
@@ -54,7 +69,33 @@ export function loadCareer() {
 }
 
 export function saveCareer(c) {
-  saveJSON(CAREER_KEY, c);
+  saveJSON(c.profile === 'story' ? STORY_KEY : CAREER_KEY, c);
+}
+
+// Swap the shared career object between the free-play and story saves.
+// Everything holds a reference to the same object, so we mutate it in place.
+export function switchProfile(career, settings, to) {
+  if ((career.profile || 'free') === to) return;
+  career.carId = settings.carId;
+  saveCareer(career);
+  let next;
+  if (to === 'story') {
+    next = loadJSON(STORY_KEY, null) || newStoryCareer();
+    next.story = { chapter: 0, done: {}, seen: {}, finished: false, ...(next.story || {}) };
+    next.stats = { ...newCareer().stats, ...(next.stats || {}) };
+  } else next = loadCareer();
+  for (const k of Object.keys(career)) delete career[k];
+  Object.assign(career, next, { profile: to });
+  if (!Object.keys(career.owned).length) career.owned.junker = { up: {}, color: 10 };
+  settings.carId = career.owned[career.carId] ? career.carId : Object.keys(career.owned)[0];
+}
+
+export function resetStory(career, settings) {
+  const fresh = newStoryCareer();
+  for (const k of Object.keys(career)) delete career[k];
+  Object.assign(career, fresh);
+  settings.carId = 'junker';
+  saveCareer(career);
 }
 
 export const owns = (c, id) => !!c.owned[id];

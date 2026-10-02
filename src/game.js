@@ -11,7 +11,7 @@ import { AIDriver } from './ai.js';
 import { loadJSON, saveJSON } from './settings.js';
 import { fmtTime } from './hud.js';
 import { buildSpec, raceReward, lapReward, saveCareer, modsActive } from './career.js';
-import { DragRace, LANE } from './drag.js';
+import { DragRace, LANE, settle } from './drag.js';
 import { JobRunner } from './jobs.js';
 
 const STEP = 1 / 240;
@@ -87,9 +87,10 @@ export class Game {
     const drag = cfg.mode === 'drag';
     const n = race ? cfg.opponents : 0;
     const slot = (i) => ({ s: -12 - i * 9, d: i % 2 ? -2.6 : 2.6 });
+    const rivals = cfg.rivals || [];
     for (let i = 0; i < n; i++) {
       const g = slot(i);
-      const ai = new AIDriver(track, i, g.s, g.d, cfg.difficulty, { tier: base.tier, speed: this.mods.aiSpeed * (this.rain ? 0.9 : 1) });
+      const ai = new AIDriver(track, i, g.s, g.d, cfg.difficulty, { tier: base.tier, speed: this.mods.aiSpeed * (this.rain ? 0.9 : 1), rival: rivals[i] });
       const model = new CarModel(ai.spec, ai.color, { number: ai.number, helmet: [0xffffff, 0xff3b30, 0x34c759, 0x0a84ff][i % 4] });
       ai.model = model;
       this.scene.add(model.root);
@@ -771,6 +772,12 @@ export class Game {
       topSpeedBonus: Math.min(1500, Math.max(0, Math.round((topKmh - 200) * 8 / 10) * 10)),
     });
     this._pay(reward.total);
+    if (this.cfg.pink && this.ais[0]?.rival) {
+      // Pink-slip race against the lead rival.
+      const rv = this.ais[0].rival;
+      const lines = settle(this.career, this.settings, { win: this.finishPosition === 1, pink: true, bet: 0, odds: 1, carId: this.base.id, opp: { name: rv.name, carId: rv.carId, up: rv.up || {}, color: rv.color }, you: {} });
+      reward.lines.push(...lines);
+    }
     const st = this.career.stats;
     st.races++;
     if (this.finishPosition === 1) st.wins++;
@@ -783,6 +790,8 @@ export class Game {
     return {
       track: TRACKS[this.cfg.track].name,
       position: this.finishPosition,
+      story: this.cfg.story || null,
+      pink: !!this.cfg.pink,
       reward,
       balance: this.career.money,
       topSpeed: this.topSpeed,

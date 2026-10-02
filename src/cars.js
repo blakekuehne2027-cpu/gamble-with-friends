@@ -46,7 +46,7 @@ export const CARS = [
     blurb: 'Your first car. Light, honest and slow enough to learn the shifter on.',
     style: 'coupe',
     color: 0x22c55e,
-    price: 0,
+    price: 8000,
     tier: 1,
     mass: 1180,
     inertia: 1850,

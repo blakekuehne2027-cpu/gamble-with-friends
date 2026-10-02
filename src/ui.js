@@ -11,6 +11,8 @@ import { Wizard } from './wizard.js';
 import { fmtTime } from './hud.js';
 import { makeOpponents, BETS, betAmount, simulateRun, dragTrackIndex, carValue } from './drag.js';
 import { jobBoard, fmtLap } from './jobs.js';
+import { CHARACTERS, CHAPTERS, storyState, chapter, currentEvent, meetsRequirement, eventPassed, completeEvent, eventConfig, bestOwnedTier } from './story.js';
+import { switchProfile, resetStory } from './career.js';
 import {
   UPGRADES, buyCar, buyUpgrade, upgradeLevel, upgradeCost, owns, buildSpec, perfStats, carColorIndex,
   saveCareer, saveMods, unlockCar, unlockAll, maxUpgrades, maxPrize, fmtMoney, MOD_DEFAULTS, modsActive, newCareer,
@@ -53,6 +55,9 @@ export class UI {
   }
 
   show(name, isBack = false) {
+    // The main menu always runs on the free-play save; the story hub on the story save.
+    if (name === 'main' && this.career.profile === 'story') switchProfile(this.career, this.S, 'free');
+    if (name === 'story' && this.career.profile !== 'story') switchProfile(this.career, this.S, 'story');
     if (!isBack && this.screen && this.screen !== name) this.stack.push(this.screen);
     if (name === 'garage' && !isBack) this.garageId = this.S.carId;
     this.screen = name;
@@ -71,6 +76,7 @@ export class UI {
     this._setFocus(pref >= 0 ? pref : 0);
     this._renderStatus();
     this._syncShowroom();
+    if (name === 'story' && !this.dlg) setTimeout(() => this.screen === 'story' && this.mode === 'menu' && !this.dlg && this._storyHub(), 0);
   }
 
   // Show the car being looked at (garage) or the selected car everywhere else.
@@ -119,7 +125,8 @@ export class UI {
       ${needsSetup ? `<div class="callout"><b>Wheel detected:</b> ${esc(wheel.id)}<br>Run the 30-second setup so your pedals and shifter work. <button class="btn primary nav" data-act="wizard" data-default="1">Set up wheel</button></div>` : ''}
       ${this._money()}
       <div class="menu-list">
-        <button class="btn big nav" data-act="race" ${needsSetup ? '' : 'data-default="1"'}>Race</button>
+        <button class="btn big nav story-btn" data-act="story" ${needsSetup ? '' : 'data-default="1"'}>Story: Underdog</button>
+        <button class="btn big nav" data-act="race">Race</button>
         <button class="btn big nav" data-act="tt">Time Trial</button>
         <button class="btn big nav" data-act="drag">Drag Race</button>
         <button class="btn big nav" data-act="jobs">Jobs</button>
@@ -414,13 +421,44 @@ export class UI {
       case 'ffbtest': this.ffb.test(this.S.ffbInvert); break;
       case 'resume': this.togglePause(); break;
       case 'restart': this.closeOverlay(); this.game.restart(); this._enterRace(); break;
-      case 'quit': this.closeOverlay(); this.game.stop(); this.show('main', true); this.stack = ['title']; break;
+      case 'quit':
+        this.closeOverlay();
+        this.game.stop();
+        if (this.career.profile === 'story') { this.stack = ['title', 'main']; this.show('story', true); } else { this.show('main', true); this.stack = ['title']; }
+        break;
       case 'again':
-        if (this.lastResults?.type === 'drag') { this.closeOverlay(); this._startDrag(true); break; }
+        if (this.lastResults?.type === 'drag') {
+          // Pink slips always ask again: your next car is on the line.
+          if (this.lastResults.pink) { this.closeOverlay(); this.game.stop(); this.stack = ['title', 'main']; this.show('drag'); this.toast('Pink slips again? Pick your car and confirm.'); break; }
+          this.closeOverlay(); this._startDrag(true); break;
+        }
         this.closeOverlay(); this.game.restart(); this._enterRace(); break;
       case 'garage': this.show('garage'); break;
       case 'drag': this.show('drag'); break;
       case 'jobs': this.show('jobs'); break;
+      case 'story': this.stack = ['title', 'main']; this.show('story'); break;
+      case 'storyGo': this._storyGo(); break;
+      case 'storyNext': this._storyNext(); break;
+      case 'storyRetry': {
+        const cfg = this.game.cfg;
+        if (cfg && cfg.mode !== 'job' && !owns(this.career, cfg.carId)) {
+          this.toast('That car is gone. Rebuild first.');
+          this._storyNext();
+          break;
+        }
+        this.closeOverlay(); this.game.restart(); this._enterRace(); break;
+      }
+      case 'storyReset':
+        if (this._confirmReset && performance.now() - this._confirmReset < 4000) {
+          resetStory(this.career, this.S);
+          this._confirmReset = 0;
+          this.toast('Story restarted. Back to the Rust Bucket.');
+          this._rerender();
+        } else {
+          this._confirmReset = performance.now();
+          this.toast('Press again within 4 seconds to restart the story from scratch.');
+        }
+        break;
       case 'jobRetry': this.closeOverlay(); this.game.restart(); this._enterRace(); break;
       case 'jobBoard': this.closeOverlay(); this.game.stop(); this.stack = ['title', 'main']; this.show('jobs'); break;
       case 'dragGo': this._startDrag(); break;
@@ -478,6 +516,10 @@ export class UI {
 
   _modAction(what) {
     const C = this.career;
+    if (C.profile === 'story' && ['op', 'money', 'unlock', 'max'].includes(what)) {
+      this.toast('No free cars or cash in Story mode. Earn it, kid!');
+      return;
+    }
     if (what === 'op') {
       unlockCar(C, 'hypernova');
       this.S.carId = 'hypernova';
@@ -690,7 +732,7 @@ export class UI {
   _overlay_results() {
     const r = this.lastResults;
     const rows = r.rows.map((x) => `<tr class="${x.player ? 'me' : ''}"><td>${x.pos}</td><td><i class="dot" style="background:${x.color}"></i>${esc(x.name)}</td><td>${esc(x.car)}</td><td>${x.best}</td><td>${x.time}</td></tr>`).join('');
-    const pay = r.reward.lines.map(([label, v]) => `<div><span>${esc(label)}</span><b>+${fmtMoney(v)}</b></div>`).join('');
+    const pay = r.reward.lines.map(([label, v]) => `<div><span>${esc(label)}</span>${v ? `<b>+${fmtMoney(v)}</b>` : ''}</div>`).join('');
     return `
       <h1 class="title">${r.position === 1 ? 'Victory!' : `You finished P${r.position}`}</h1>
       <p class="dim">${esc(r.track)} · top speed ${Math.round(this.S.units === 'mph' ? r.topSpeed * 2.23694 : r.topSpeed * 3.6)} ${this.S.units === 'mph' ? 'mph' : 'km/h'}</p>
@@ -699,9 +741,9 @@ export class UI {
         <div class="earnings"><h4>Earnings</h4>${pay}<div class="total"><span>Total</span><b>+${fmtMoney(r.reward.total)}</b></div><div class="bal"><span>Balance</span><b>${fmtMoney(r.balance)}</b></div></div>
       </div>
       <div class="menu-list row">
-        <button class="btn primary big nav" data-act="again" data-default="1">Race again</button>
-        <button class="btn big nav" data-act="results-garage">Garage</button>
-        <button class="btn big nav" data-act="quit">Main menu</button>
+        ${r.story ? `<button class="btn primary big nav" data-act="storyNext" data-default="1">Continue story</button>${r.pink ? '' : '<button class="btn big nav" data-act="storyRetry">Try again</button>'}` : `<button class="btn primary big nav" data-act="again" data-default="1">Race again</button>
+        <button class="btn big nav" data-act="results-garage">Garage</button>`}
+        <button class="btn big nav" data-act="quit">${this.career.profile === 'story' ? 'Story hub' : 'Main menu'}</button>
       </div>`;
   }
 
@@ -739,10 +781,154 @@ export class UI {
         ${r.shifts.length ? `<p class="dim shifts">Shifts: ${r.shifts.map(esc).join(' · ')}</p>` : ''}</div>
       </div>
       <div class="menu-list row">
-        ${story ? `<button class="btn primary big nav" data-act="storyNext" data-default="1">Continue story</button>${!r.win ? '<button class="btn big nav" data-act="storyRetry">Try again</button>' : ''}` : `<button class="btn primary big nav" data-act="again" data-default="1">Run it back</button>
+        ${story ? `<button class="btn primary big nav" data-act="storyNext" data-default="1">Continue story</button>${!r.win && !r.pink ? '<button class="btn big nav" data-act="storyRetry">Try again</button>' : ''}` : `<button class="btn primary big nav" data-act="again" data-default="1">${r.pink ? 'Another pink slip race' : 'Run it back'}</button>
         <button class="btn big nav" data-act="dragSetup">Change opponent / bet</button>`}
-        <button class="btn big nav" data-act="quit">Main menu</button>
+        <button class="btn big nav" data-act="quit">${this.career.profile === 'story' ? 'Story hub' : 'Main menu'}</button>
       </div>`;
+  }
+
+  _screen_story() {
+    const C = this.career, st = storyState(C);
+    const chap = chapter(C);
+    const cur = currentEvent(C);
+    const car = findCar(this.S.carId);
+    const icon = { job: '🧰', race: '🏁', drag: '🚦', own: '🔑' };
+    const allEvents = CHAPTERS.map((ch, ci) => ch.events.map((e) => ({ ...e, ci }))).flat();
+    const cards = chap.events.map((e) => {
+      const done = st.done[e.id];
+      const isCur = cur && cur.id === e.id;
+      const blocked = isCur && e.minTier && bestOwnedTier(C) < e.minTier && e.type !== 'own';
+      const btn = isCur ? (e.type === 'own' ? `<button class="btn primary nav" data-act="garage" data-default="1">Go to the Garage</button>` : blocked ? `<p class="red">Need a class ${e.minTier}+ car first: earn money with jobs & bets, then buy one.</p>` : `<button class="btn primary nav" data-act="storyGo" data-default="1">${e.drag?.pink || e.race?.pink ? 'Race for pink slips' : 'Let\'s go'}</button>`) : '';
+      return `<div class="ev ${done ? 'done' : isCur ? 'cur' : 'locked'}"><div class="ev-h"><span>${icon[e.type]}</span><b>${esc(e.title)}</b>${done ? '<em>✓ DONE</em>' : e.reward ? `<em>${fmtMoney(e.reward)}</em>` : ''}</div><p>${esc(e.desc)}</p>${btn}</div>`;
+    }).join('');
+    const doneCount = allEvents.filter((e) => st.done[e.id]).length;
+    return `
+      <h1 class="title story-title">UNDERDOG</h1>
+      ${this._money()}
+      <p class="tag small">${st.finished ? 'THE END. You went from a Rust Bucket to the king of the city.' : `Chapter ${st.chapter + 1}: <b>${esc(chap.title)}</b>`} · Story ${doneCount}/${allEvents.length} · Driving: <b>${esc(car.name)}</b></p>
+      <div class="setup story">
+        <div class="setup-opts">
+          ${st.finished ? '<div class="ev cur"><div class="ev-h"><span>👑</span><b>You beat Kane.</b></div><p>The city is yours. Keep racing: the job board, the drag strip and every car are still waiting.</p></div>' : cards}
+        </div>
+        <div class="setup-info">
+          <div class="card">
+            <h3>Underdog life</h3>
+            <p>Lost your car on a pink slip? Broke? That's the game. Work jobs and hit the strip to build back up.</p>
+            <button class="btn nav" data-act="jobs">Job board</button>
+            <button class="btn nav" data-act="drag">Drag strip (bets &amp; pinks)</button>
+            <button class="btn nav" data-act="garage">Garage</button>
+            <button class="btn nav" data-act="race">Street race (prize money)</button>
+          </div>
+          <div class="card cast">${['pops', 'tank', 'lola', 'kane'].map((k) => { const c = CHARACTERS[k]; return `<div><i style="background:${c.color}">${c.initials}</i><span><b>${esc(c.name)}</b><br>${esc(c.role)}</span></div>`; }).join('')}</div>
+          <button class="btn ghost nav" data-act="storyReset">Restart story</button>
+          <button class="btn ghost nav" data-act="back">Main menu</button>
+        </div>
+      </div>`;
+  }
+
+  // Chapter intros and "you now own a car" objectives run when the hub opens.
+  _storyHub() {
+    const C = this.career, st = storyState(C);
+    const key = 'ch' + st.chapter;
+    if (!st.finished && !st.seen[key]) {
+      st.seen[key] = 1;
+      saveCareer(C);
+      this._dialog(chapter(C).intro, () => this._storyHub());
+      return;
+    }
+    const cur = currentEvent(C);
+    if (cur && cur.type === 'own' && eventPassed(cur, null, C)) {
+      completeEvent(C, cur);
+      this._dialog(cur.after || [], () => { this.show('story', true); this._storyHub(); });
+      return;
+    }
+    if (cur && cur.type === 'own' && !st.seen[cur.id]) {
+      st.seen[cur.id] = 1;
+      saveCareer(C);
+      this._dialog(cur.before || []);
+    }
+  }
+
+  _storyGo() {
+    const C = this.career, ev = currentEvent(C);
+    if (!ev) return;
+    if (!meetsRequirement(ev, C, this.S)) {
+      this.toast(`You need a class ${ev.minTier}+ car for this.`);
+      return;
+    }
+    const st = storyState(C);
+    const start = () => {
+      const cfg = eventConfig(ev, C, this.S);
+      this.storyEvent = ev;
+      saveSettings(this.S);
+      this.audio.init();
+      if (cfg.mode === 'job') this.lastJob = cfg.job;
+      this.game.start(cfg);
+      this._enterRace();
+    };
+    if (ev.before && !st.seen[ev.id]) {
+      st.seen[ev.id] = 1;
+      saveCareer(C);
+      this._dialog(ev.before, start);
+    } else start();
+  }
+
+  _storyNext() {
+    const C = this.career, ev = this.storyEvent || currentEvent(C);
+    const res = this.lastResults;
+    this.closeOverlay();
+    this.game.stop();
+    this.stack = ['title', 'main'];
+    if (ev && eventPassed(ev, res, C)) {
+      const out = completeEvent(C, ev);
+      this.show('story', true);
+      const lines = [...(ev.after || [])];
+      if (out.reward) lines.push(['pops', `Story bonus: ${fmtMoney(out.reward)}. Don't blow it all at the strip.`]);
+      this._dialog(lines, () => { this.show('story', true); this._storyHub(); });
+    } else {
+      this.show('story', true);
+      const who = ev?.race?.rivals?.[0]?.char || ev?.drag?.char || 'pops';
+      const taunt = { tank: 'Ha! Told you. Come back when you can drive.', lola: 'Cute effort, sweetie.', dutch: '...', kane: 'Is that all the underdog has?', pops: "Shake it off, kid. Try again when you're ready." }[who];
+      this._dialog([[who, taunt]]);
+    }
+  }
+
+  // Visual-novel style dialogue: [[characterKey, text], ...]
+  _dialog(lines, done) {
+    const el = document.getElementById('dialog');
+    if (!lines || !lines.length) { done?.(); return; }
+    let i = -1;
+    let typing = null;
+    const next = () => {
+      if (typing) { clearInterval(typing); typing = null; el.querySelector('#dlg-text').textContent = lines[i][1]; return; }
+      i++;
+      if (i >= lines.length) {
+        el.classList.remove('show');
+        this.dlg = null;
+        done?.();
+        return;
+      }
+      const [who, text] = lines[i];
+      const c = CHARACTERS[who] || CHARACTERS.pops;
+      const p = el.querySelector('#dlg-p');
+      p.textContent = c.initials;
+      p.style.background = c.color;
+      el.querySelector('#dlg-name').textContent = c.name;
+      el.querySelector('#dlg-name').style.color = c.color;
+      const t = el.querySelector('#dlg-text');
+      t.textContent = '';
+      let k = 0;
+      typing = setInterval(() => {
+        k += 2;
+        t.textContent = text.slice(0, k);
+        if (k >= text.length) { clearInterval(typing); typing = null; }
+      }, 18);
+      this.audio.click();
+    };
+    el.onclick = () => next();
+    el.classList.add('show');
+    this.dlg = { next };
+    next();
   }
 
   _screen_jobs() {
@@ -786,7 +972,7 @@ export class UI {
       <div class="earnings wide"><h4>${r.success ? 'Paid' : 'No pay'}</h4>${lines}${r.success ? `<div class="total"><span>Total</span><b>+${fmtMoney(r.pay)}</b></div>` : ''}<div class="bal"><span>Balance</span><b>${fmtMoney(r.balance)}</b></div></div>
       <div class="menu-list row">
         ${r.story ? `<button class="btn primary big nav" data-act="storyNext" data-default="1">Continue story</button>${r.success ? '' : '<button class="btn big nav" data-act="storyRetry">Try again</button>'}` : r.success ? '<button class="btn primary big nav" data-act="jobBoard" data-default="1">Job board</button>' : '<button class="btn primary big nav" data-act="jobRetry" data-default="1">Try again</button><button class="btn big nav" data-act="jobBoard">Job board</button>'}
-        <button class="btn big nav" data-act="quit">Main menu</button>
+        <button class="btn big nav" data-act="quit">${this.career.profile === 'story' ? 'Story hub' : 'Main menu'}</button>
       </div>`;
   }
 
@@ -923,6 +1109,10 @@ export class UI {
     }
     if (this.binding) { this._updateBind(); return; }
     const m = this.input.state.menu;
+    if (this.dlg) {
+      if (m.select || m.back) this.dlg.next();
+      return;
+    }
     if (this.mode === 'menu') {
       if (this.screen === 'title') {
         if (m.select || this.input.state.throttle > 0.6 && !this._titleLatch) {
