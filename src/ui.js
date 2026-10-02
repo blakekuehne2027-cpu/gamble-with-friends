@@ -128,6 +128,7 @@ export class UI {
     return `
       <div class="logo small"><span class="logo-red">RED</span>LINE<small>WHEEL RACING</small></div>
       ${needsSetup ? `<div class="callout"><b>Wheel detected:</b> ${esc(wheel.id)}<br>Run the 30-second setup so your pedals and shifter work. <button class="btn primary nav" data-act="wizard" data-default="1">Set up wheel</button></div>` : ''}
+      ${!needsSetup && (wheel || this.input.wheelConnected()) && this.ffb.supported && !this.ffb.ready ? `<div class="callout ffb-callout"><span><b>Force feedback is off.</b> Click, then pick your wheel in the popup (one time only).</span><button class="btn primary nav" data-act="ffbconnect">Turn on force feedback</button></div>` : ''}
       ${this._money()}
       <div class="menu-list">
         <button class="btn big nav story-btn" data-act="story" ${needsSetup ? '' : 'data-default="1"'}>Story: Underdog</button>
@@ -322,6 +323,8 @@ export class UI {
           ${this._optRow('ffb', 'Force feedback', onoff(S.ffb))}
           ${this._optRow('ffbStrength', 'FFB strength', pct(S.ffbStrength))}
           ${this._optRow('ffbInvert', 'Invert FFB direction', onoff(S.ffbInvert))}
+          ${this._optRow('ffbEffects', 'Road feel &amp; effects (kerbs, ABS, bumps…)', pct(S.ffbEffects))}
+          ${this._optRow('rumble', 'Controller rumble (Xbox / PlayStation)', onoff(S.rumble))}
           <button class="btn nav" data-act="ffbtest">Test: wheel should turn RIGHT then LEFT</button>
           ${this._optRow('revLeds', 'Rev lights on wheel (G29)', onoff(S.revLeds))}
           <h4>Display &amp; sound</h4>
@@ -431,7 +434,17 @@ export class UI {
       case 'back': this.back(); break;
       case 'go': this.startRace(); break;
       case 'ffbconnect':
-        this.ffb.connect().then(() => this.show('settings', true));
+        if (navigator.userActivation && !navigator.userActivation.isActive) {
+          this.toast('Click the button with the mouse (or press Enter): the browser only shows the wheel list after a real click.');
+          break;
+        }
+        this.ffb.connect().then((ok) => {
+          if (ok) {
+            this.toast('Force feedback on! Feel the wheel move right, then left.');
+            this.ffb.test(this.S.ffbInvert);
+          }
+          if (this.mode === 'menu') this._rerender();
+        });
         break;
       case 'ffbtest': this.ffb.test(this.S.ffbInvert); break;
       case 'resume': this.togglePause(); break;
@@ -665,6 +678,7 @@ export class UI {
       case 'brakeStrength': S.brakeStrength = +step(S.brakeStrength, 0.5, 1, 0.05).toFixed(2); break;
       case 'wheelRange': S.wheelRange = step(S.wheelRange, 180, 1080, 30); break;
       case 'steerRatio': S.steerRatio = step(S.steerRatio, 6, 20, 1); break;
+      case 'ffbEffects': S.ffbEffects = +step(S.ffbEffects, 0, 1, 0.1).toFixed(1); break;
       case 'ffbStrength': S.ffbStrength = +step(S.ffbStrength, 0, 1, 0.05).toFixed(2); break;
       case 'volume': S.volume = +step(S.volume, 0, 1, 0.1).toFixed(1); this.audio.setVolume(S.volume); break;
       case 'radio': S.radio = ((S.radio + 1 + dir + STATIONS.length + 1) % (STATIONS.length + 1)) - 1; this.radio.setStation(S.radio); break;

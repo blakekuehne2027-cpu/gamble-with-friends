@@ -3,7 +3,8 @@
 A 3D racing game that runs in your browser, built for the **Logitech G29 / G920 Driving Force** wheel, pedals and the **Driving Force Shifter** (H-pattern). Keyboard and Xbox/PlayStation controllers work too.
 
 - **Real H-pattern shifting**: shifter in gear = in gear, middle = neutral. Optional manual clutch: grind the gears if you don't clutch, stall if you dump it at idle.
-- **Force feedback + rev lights** straight to the wheel (via WebHID): tyre self-aligning torque that goes light when you understeer, kerb rumble, grass, impacts and a soft lock at the car's steering limit. The G29's LED bar works as shift lights.
+- **Force feedback + rev lights** straight to the wheel (via WebHID). Steering weight comes from the front tyres: it gets heavier with load and downforce, goes light when you understeer, and pulls into opposite lock when the back steps out. On top of that: road texture, kerb rumble, grass, ABS chatter, locked wheels, wheelspin, gear-change kicks, the rev limiter, engine shake at idle, nitro, crashes and a soft lock at the car's steering limit. The G29's LED bar works as shift lights.
+- **Controller rumble** on Xbox / PlayStation controllers for the same effects.
 - **Cockpit view** with a steering wheel that turns 1:1 with yours, rev LEDs and a gear/speed display. Bonnet and chase cams too.
 - **Story mode, UNDERDOG**: you're broke, driving a $500 rust bucket. Work jobs, race your way up, and bet your pink slip against the street kings, all the way to Viktor "King" Kane. Lose a pink-slip race and you lose the car. Lose your last one and you're back in the junker.
 - **3 circuits plus a dragstrip**: *Coastline GP* (ocean and mountains), *Pinewood Ring* (hilly forest), *Midnight Circuit* (city streets) and *Thunder Valley Dragway*.
@@ -35,9 +36,10 @@ A 3D racing game that runs in your browser, built for the **Logitech G29 / G920 
 3. Open the game and **press any button on the wheel** (browsers only show controllers after a button press).
 4. The main menu will say *Wheel detected*. Click **Set up wheel** and follow the prompts (about 30 seconds):
    turn the wheel left/right/center, press each pedal, click through gears 1-6 and R, then pick your paddle and button choices (any step can be skipped).
-5. **Force feedback**: *Settings → Connect wheel for force feedback* and pick your wheel in the browser popup.
+5. **Force feedback**: click **Turn on force feedback** on the main menu (or *Settings → Connect wheel for force feedback*) and pick your wheel in the browser popup. It has to be a real mouse click or Enter key: browsers don't open the popup from a wheel button.
    Press *Test*: the wheel should turn **right then left**. If it goes the other way, turn on *Invert FFB direction*.
    After the first time, the game reconnects to the wheel automatically.
+   *FFB strength* sets the overall force; *Road feel & effects* sets how strong the bumps, kerbs, ABS and other vibrations are (turn it down if the wheel rattles too much).
 
 Once set up you can drive the menus with the wheel: **paddles** move up/down, **turning** changes an option, **gas** selects, **brake** goes back.
 

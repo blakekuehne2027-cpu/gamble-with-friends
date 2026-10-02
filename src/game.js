@@ -217,6 +217,7 @@ export class Game {
     if (!this.active) return;
     this.active = false;
     this.ffb.setForce(0);
+    this._stopRumble();
     this.ffb.setLeds(0);
     this.audio.update({ paused: true });
     if (this.world) this.world.dispose();
@@ -238,6 +239,7 @@ export class Game {
     this.paused = p;
     if (p) {
       this.ffb.setForce(0);
+      this._stopRumble();
       this.audio.update({ paused: true });
     }
   }
@@ -323,7 +325,7 @@ export class Game {
       clutch: inp.clutch, throttle, brake, autoClutch, noAutoReverse: !!this.drag && this.drag.you.left === null,
     });
     for (const e of ev) {
-      if (e === 'shift') this.audio.shift();
+      if (e === 'shift') { this.audio.shift(); this.ffbShift = 0.08; }
       if (e === 'grind') { this.audio.grind(); this.ffbJolt = 0.35; this.hud.sub('GRIND! Use the clutch', 1.4); }
       if (e === 'start') this.audio.starter();
     }
@@ -425,6 +427,7 @@ export class Game {
     this.model.setCockpitVisible(false);
     if (this.ghostModel) this.ghostModel.root.visible = false;
     this.ffb.setForce(0);
+    this._stopRumble();
     this.hud.setReplay(true);
     return true;
   }
@@ -464,6 +467,8 @@ export class Game {
     if (!this.rewinding) {
       this.rewinding = true;
       this.hud.setRewind(true);
+      this.ffb.setForce(0);
+      this._stopRumble();
       unlock('do_over', this.career);
     }
     const h = this.history;
@@ -1097,18 +1102,35 @@ export class Game {
   }
 
   _updateFFB(dt, inp, env, maxSteerDeg) {
-    const S = this.settings, car = this.car;
+    const S = this.settings, car = this.car, spec = this.spec;
+    const speed = car.speed;
+    this.odo = (this.odo || 0) + speed * dt;
+    if (this.ffbShift > 0) this.ffbShift -= dt;
+    const jolt = this.ffbJolt;
+    this.ffbJolt *= Math.exp(-dt * 14);
+    this._rumble(dt, inp);
     if (!this.ffb.ready || !S.ffb || !inp.wheel) {
       if (this.ffb.ready) this.ffb.setForce(0);
       this._leds();
       return;
     }
-    const speed = car.speed;
     const raw = inp.steerRaw;
     const wVel = (raw - this.prevSteerRaw) / Math.max(dt, 1e-3);
     this.prevSteerRaw = raw;
-    // Self-aligning torque from the front tyres (goes light when they slide).
-    let f = (car.steerTorque / Math.max(1, car.steerTorqueRef)) * 0.85 * Math.min(1, speed / 5);
+    const ph = this.frame % 2 ? 1 : -1; // flips every frame: a buzz the wheel motor can play
+    const fxAmt = S.ffbEffects ?? 0.7;
+
+    // Steering weight: self-aligning torque from the front tyres, measured
+    // against the car's static front load. The wheel gets heavier as weight
+    // moves forward under braking and with downforce, lighter over crests, in
+    // the rain and when the front tyres start to slide (your understeer warning).
+    const L = spec.a + spec.b;
+    const NfStatic = spec.mass * 9.81 * (spec.b / L);
+    const ref = spec.mu * spec.frontGrip * NfStatic * 0.03;
+    // Real tyres' self-aligning torque grows with load (longer contact patch).
+    const load = Math.max(0.5, Math.min(1.8, car.Nf / NfStatic)) ** 0.8;
+    const sat = (car.steerTorque / ref) * 0.85 * load;
+    let f = Math.tanh(sat * 1.15) / 1.15 * Math.min(1, speed / 5);
     // Gentle centring spring at parking speeds plus damping.
     f += -raw * 0.55 * Math.max(0, 1 - speed / 12);
     f += -wVel * (0.035 + 0.02 * Math.min(1, speed / 20));
@@ -1116,16 +1138,75 @@ export class Game {
     const deg = (raw * S.wheelRange) / 2;
     const lock = maxSteerDeg * S.steerRatio;
     if (Math.abs(deg) > lock) f -= Math.sign(deg) * Math.min(1, (Math.abs(deg) - lock) / 12 + 0.25);
-    // Road texture.
-    if (this.onKerb && speed > 2) f += (this.frame % 2 ? 0.16 : -0.16) * Math.min(1, speed / 12);
-    if (this.onGrass && speed > 2) f += (Math.random() - 0.5) * 0.22 * Math.min(1, speed / 15);
-    if (car.grinding) f += this.frame % 2 ? 0.12 : -0.12;
-    // Impacts.
-    f += this.ffbJolt;
-    this.ffbJolt *= Math.exp(-dt * 14);
+
+    // --- Effects (scaled by "Road feel & effects") ---
+    let e = 0;
+    // Road texture: small bumps that grow with speed (less on a wet road).
+    if (speed > 1) {
+      const p = this.odo;
+      const n = 0.5 * Math.sin(p * 2.1) + 0.3 * Math.sin(p * 5.3 + 1.3) + 0.2 * Math.sin(p * 11.7 + 0.4);
+      e += n * 0.06 * Math.min(1, speed / 25) * (this.rain ? 0.7 : 1);
+    }
+    if (this.onKerb && speed > 2) e += ph * 0.18 * Math.min(1, speed / 12);
+    if (this.onGrass && speed > 2) e += (Math.random() - 0.5) * 0.26 * Math.min(1, speed / 15);
+    if (car.grinding) e += ph * 0.14;
+    // ABS chattering, or juddering locked fronts with ABS off.
+    if (this.absActive) e += Math.sin(this.time * Math.PI * 2 * 13) * 0.08;
+    if (car.frontLock) e += ph * 0.12;
+    // Wheelspin, the rev limiter, idle shake, gear changes and nitro.
+    if (Math.abs(car.rearSpin) > 1.5) e += (Math.random() - 0.5) * 0.1 * Math.min(1, Math.abs(car.rearSpin) / 6);
+    if (car.limiterCut) e += ph * 0.06;
+    if (car.engineOn && speed < 1) e += (Math.random() - 0.5) * 0.09 * (0.4 + car.rpm / spec.redline);
+    if (this.ffbShift > 0) e += ph * 0.16;
+    if (this.nitroOn) e += (Math.random() - 0.5) * 0.06;
+    f += e * fxAmt * 1.4;
+    // Impacts (walls and cars).
+    f += jolt;
     if (!car.engineOn) f *= 0.7;
     this.ffb.setForce(Math.max(-1, Math.min(1, f * S.ffbStrength)), S.ffbInvert);
     this._leds();
+  }
+
+  // Rumble for Xbox / PlayStation controllers (Gamepad API vibration).
+  _rumble(dt, inp) {
+    const S = this.settings, car = this.car;
+    const pad = inp.source === 'pad' && S.rumble !== false ? this.input.standardPad() : null;
+    const act = pad?.vibrationActuator;
+    if (!act) {
+      if (this.rumbling) this._stopRumble();
+      return;
+    }
+    this.rumbleT = (this.rumbleT || 0) - dt;
+    if (this.rumbleT > 0) return;
+    this.rumbleT = 0.06;
+    const speed = car.speed;
+    const k = S.ffbEffects ?? 0.7;
+    let strong = Math.min(1, Math.abs(this.ffbJolt) * 1.4);
+    let weak = 0;
+    if (this.onGrass && speed > 2) strong += 0.35 * Math.min(1, speed / 15);
+    if (this.onKerb && speed > 2) weak += 0.55 * Math.min(1, speed / 12);
+    if (this.absActive) weak += Math.sin(this.time * Math.PI * 2 * 6) > 0 ? 0.5 : 0.15;
+    if (car.frontLock) weak += 0.5;
+    if (Math.abs(car.rearSpin) > 1.5) strong += 0.3;
+    if (car.limiterCut) weak += 0.25;
+    if (this.ffbShift > 0) weak += 0.45;
+    if (this.nitroOn) strong += 0.3;
+    if (car.grinding) weak += 0.6;
+    weak += 0.04 * Math.min(1, speed / 40);
+    strong = Math.min(1, strong * k * 1.3);
+    weak = Math.min(1, weak * k * 1.3);
+    if (strong < 0.03 && weak < 0.03) {
+      if (this.rumbling) this._stopRumble();
+      return;
+    }
+    this.rumbling = true;
+    act.playEffect?.('dual-rumble', { duration: 110, strongMagnitude: strong, weakMagnitude: weak })?.catch?.(() => {});
+  }
+
+  _stopRumble() {
+    this.rumbling = false;
+    const act = this.input.standardPad()?.vibrationActuator;
+    try { act?.reset?.()?.catch?.(() => {}); } catch (e) { /* ignore */ }
   }
 
   _leds() {

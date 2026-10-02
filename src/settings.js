@@ -15,6 +15,8 @@ export const DEFAULTS = {
   ffb: true,
   ffbStrength: 0.7,
   ffbInvert: false,
+  ffbEffects: 0.7, // road texture, kerbs, ABS, wheelspin, gear changes, engine
+  rumble: true, // controller vibration
   revLeds: true,
   units: 'mph',
   volume: 0.8,
