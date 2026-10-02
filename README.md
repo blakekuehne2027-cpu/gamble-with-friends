@@ -77,7 +77,7 @@ Between events, earn money with **Jobs** and in the **Drag Race** betting lanes.
 - **Time Trial** pays per lap, plus $1,200 for beating your personal best.
 - AI rivals drive cars from your class (or one below), so upgrading your car gives you the edge.
 - To put **NITRO**, **REWIND** or **RADIO** on a wheel button without redoing the whole setup, use the *Set … button on wheel* options in *Settings*.
-- **Drag Race**: pick an opponent (Easy to Brutal; the tougher the rival, the better the odds), place a bet, then stage. Leave on the green: going before it is a foul and loses the run. Shift when the blue SHIFT light flashes. Winning a **pink slip** puts the rival's car in your garage; losing one takes yours.
+- **Drag Race**: pick an opponent (Easy to Brutal). The tougher the rival, the bigger the winner's purse (about $400 for Easy up to $2,300 for Brutal) and the better the odds on any bet you place. Then stage. Leave on the green: going before it is a foul and loses the run. Shift when the blue SHIFT light flashes. Winning a **pink slip** puts the rival's car in your garage; losing one takes yours.
 - **Jobs** refresh after each one you complete. The pay depends on the job and your car.
 - **Achievements** pay into whichever save (free play or story) you're playing when they unlock.
 - *Settings → Reset career* starts over from the Rookie Coupe.

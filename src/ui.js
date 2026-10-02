@@ -11,7 +11,7 @@ import { saveSettings, loadJSON } from './settings.js';
 import { getTrack } from './game.js';
 import { Wizard } from './wizard.js';
 import { fmtTime } from './hud.js';
-import { makeOpponents, BETS, betAmount, simulateRun, dragTrackIndex, carValue } from './drag.js';
+import { makeOpponents, BETS, betAmount, simulateRun, dragTrackIndex, carValue, purseFor } from './drag.js';
 import { jobBoard, fmtLap } from './jobs.js';
 import { CHARACTERS, CHAPTERS, storyState, chapter, currentEvent, meetsRequirement, eventPassed, completeEvent, eventConfig, bestOwnedTier } from './story.js';
 import { switchProfile, resetStory } from './career.js';
@@ -1121,7 +1121,7 @@ export class UI {
           ${this._optRow('timeOfDay', 'Time of day', timeName(S.timeOfDay, TRACKS[dragTrackIndex(TRACKS)]))}
           ${this._optRow('weather', 'Weather', S.weather === 'rain' ? '🌧 Rain' : '☀ Dry')}
           ${this._optRow('transmission', 'Transmission', transName(S.transmission))}
-          <p class="prize">${pink ? `Win: their <b>${oppCar.name}</b> (worth ~${fmtMoney(Math.round((oppCar.price || 8000) * 0.6))}). Lose: <b class="neg">your ${car.name}</b> and its upgrades.` : amount ? `Pays <b>${opp.odds.toFixed(2)}×</b>: win <b>+${fmtMoney(Math.round(amount * (opp.odds - 1)))}</b>, lose <b class="neg">-${fmtMoney(amount)}</b>` : 'Winner gets a $300 purse. Add a bet to make it interesting.'}</p>
+          <p class="prize">${pink ? `Win: their <b>${oppCar.name}</b> (worth ~${fmtMoney(Math.round((oppCar.price || 8000) * 0.6))}). Lose: <b class="neg">your ${car.name}</b> and its upgrades.` : amount ? `Bet pays <b>${opp.odds.toFixed(2)}×</b>: win <b>+${fmtMoney(Math.round(amount * (opp.odds - 1)) + purseFor(opp))}</b> (incl. the ${fmtMoney(purseFor(opp))} purse), lose <b class="neg">-${fmtMoney(amount)}</b>` : `Beat ${esc(opp.name)} for a <b>${fmtMoney(purseFor(opp))}</b> purse (tougher opponents pay more). Add a bet to make it interesting.`}</p>
           <button class="btn primary big nav" data-act="dragGo" data-default="1">${pink ? 'Race for pink slips' : 'Stage the car'}</button>
           <button class="btn nav" data-act="dragNew">New challengers</button>
           <button class="btn ghost nav" data-act="back">Back</button>
@@ -1131,7 +1131,7 @@ export class UI {
             <h3>${opp.name}</h3>
             <p>Drives a <b>${oppCar.name}</b>${lvl ? ` with stage ${lvl} engine, weight and tyre upgrades` : ' (stock)'}.</p>
             <div class="vs"><div><label>Your best possible</label><b>${this._youRun.et.toFixed(2)}s</b><span>${this._youRun.trap.toFixed(0)} mph</span></div><div><label>Their best</label><b>${opp.et.toFixed(2)}s</b><span>${opp.trap.toFixed(0)} mph</span></div></div>
-            <p class="dim">Reaction: ${opp.rt < 0.15 ? 'lightning' : opp.rt < 0.22 ? 'sharp' : 'sleepy'} · Odds ${opp.odds.toFixed(2)}×</p>
+            <p class="dim">Reaction: ${opp.rt < 0.15 ? 'lightning' : opp.rt < 0.22 ? 'sharp' : 'sleepy'} · Odds ${opp.odds.toFixed(2)}× · Purse <b>${fmtMoney(purseFor(opp))}</b></p>
           </div>
           <div class="card">
             <h3>How to launch</h3>

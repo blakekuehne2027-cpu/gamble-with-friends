@@ -83,6 +83,12 @@ export function makeOpponents(playerSpec, playerKey, seed = 1) {
   });
 }
 
+// Winner's purse (on top of any bet): the tougher the opponent, the more it pays.
+// Roughly $375 Easy, $800 Even, $1,400 Tough, $2,200 Brutal.
+export function purseFor(opp) {
+  return Math.round((300 * Math.pow(opp?.odds || 1.5, 1.6)) / 50) * 50;
+}
+
 export function oddsFor(playerEt, oppEt) {
   return Math.round(clamp(2 + (playerEt - oppEt) * 1.5, 1.15, 6) * 20) / 20;
 }
@@ -347,8 +353,9 @@ export class DragRace {
     };
     res.lines = settle(career, settings, res);
     if (win) {
-      career.money += 300;
-      res.lines.push(['Winner\'s purse', 300]);
+      const purse = purseFor(this.opp);
+      career.money += purse;
+      res.lines.push([`Winner's purse (${this.opp.label || 'rival'})`, purse]);
     }
     const st = career.stats;
     st.dragRuns = (st.dragRuns || 0) + 1;
