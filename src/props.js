@@ -335,7 +335,10 @@ export class Props {
       onHit(-vn * Math.min(1, p.mass / 600), wx, wz, -nx, -nz, p.t.sound, -vn);
     }
     collideParked(car, carY, this.cars, onHit);
-    for (const pc of this.cars) pc.update(dt, this.ground);
+    for (const pc of this.cars) {
+      pc.update(dt, this.ground);
+      pc.model.root.visible = (pc.x - car.x) ** 2 + (pc.z - car.z) ** 2 < 350 * 350;
+    }
     // Physics (two substeps) and pin-on-pin knocks.
     const h = dt / 2;
     for (let s = 0; s < 2; s++) for (const p of this.items) p.step(h, this.ground);

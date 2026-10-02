@@ -10,7 +10,7 @@ import { Particles, SkidMarks, Rain } from './effects.js';
 import { AIDriver } from './ai.js';
 import { loadJSON, saveJSON } from './settings.js';
 import { fmtTime } from './hud.js';
-import { buildSpec, raceReward, lapReward, saveCareer, modsActive } from './career.js';
+import { buildSpec, raceReward, lapReward, saveCareer, modsActive, carColorIndex } from './career.js';
 import { DragRace, LANE, settle } from './drag.js';
 import { JobRunner } from './jobs.js';
 import { unlock, checkRace, checkDrag, checkGarage } from './achievements.js';
@@ -99,6 +99,7 @@ export class Game {
     this.debris = new Debris(this.scene, (x, z) => track.heightAt(x, z), (x, z) => this._debrisBounds(x, z));
     this.misfireT = 0;
     this.slowmoT = 0;
+    this.crashTest = null;
     this.retired = false;
     this.retireAt = 0;
     this.smokeT = 0;
@@ -347,7 +348,7 @@ export class Game {
     this._updateStart(dt);
 
     // ---- Controls -> physics input ----
-    const mode = S.transmission === 'h' && inp.hGear === null ? 'seq' : S.transmission;
+    const mode = this.crashTest ? 'auto' : S.transmission === 'h' && inp.hGear === null ? 'seq' : S.transmission;
     const maxSteerDeg = (spec.maxSteer * 180) / Math.PI;
     const speed = car.speed;
     let steer;
@@ -365,6 +366,17 @@ export class Game {
       steer = this.steerCmd;
     }
     let throttle = inp.throttle, brake = inp.brake;
+    const ct = this.crashTest;
+    if (ct && !ct.hit) {
+      // Autopilot: hold the lane and the test speed until the wall.
+      let err = Math.PI / 2 - car.psi + (car.z + 240) * 0.02;
+      while (err > Math.PI) err -= 2 * Math.PI;
+      while (err < -Math.PI) err += 2 * Math.PI;
+      steer = Math.max(-1, Math.min(1, -err * 2.5 - car.r * 0.2)) * 0.6;
+      throttle = car.speed < ct.v - 0.5 ? 1 : car.speed < ct.v + 0.5 ? 0.35 : 0;
+      brake = 0;
+      ct.speed = car.speed;
+    }
     if (mode === 'auto' && car.gear === -1) [throttle, brake] = [brake, throttle];
     // The car is held on the brakes until the lights go out (you can still rev it).
     const physBrake = this.state === 'countdown' ? 1 : brake;
@@ -881,6 +893,61 @@ export class Game {
     if (this.chaseEndT && this.time - this.chaseEndT > 5) this.endChase();
   }
 
+  // ---------------------------------------------------------------- free roam tools
+  // Swap to another car where you are (free roam).
+  swapCar(id) {
+    const S = this.settings;
+    const pos = { x: this.car.x, z: this.car.z, heading: this.car.psi };
+    this.scene.remove(this.model.root);
+    this.model.dispose();
+    const base = (this.base = findCar(id));
+    const spec = buildSpec(base, this.career.owned[base.id]?.up, this.mods);
+    this.spec = spec;
+    this.cfg.carId = id;
+    this.car = new CarPhysics(spec);
+    this.paintHex = this.career.owned[id] ? PAINT_COLORS[carColorIndex(this.career, id)] ?? base.color : base.color;
+    this.model = new CarModel(spec, this.paintHex, { number: 1, cockpit: true, helmet: 0xffd200, glow: this._glowColor() });
+    this.scene.add(this.model.root);
+    if (this.night) {
+      const lamp = new THREE.SpotLight(0xfff1dc, 260, 140, 0.5, 0.45, 1.2);
+      lamp.position.set(0, 0.8, 2.0);
+      lamp.target.position.set(0, 0, 30);
+      this.model.root.add(lamp, lamp.target);
+    }
+    this.damage = new CarDamage(this.model, spec, S.damage || 'full');
+    this.car.dmg = this.damage.mods;
+    this.chassis = new Chassis(spec);
+    this.tumble = new Tumble(spec, this.model.style);
+    this._propDims = null;
+    this.nitro = spec.nitro || 0;
+    this.hud.setNitro(spec.nitro > 0 ? 1 : -1);
+    this.audio.setPlayerCar(spec);
+    this.model.setCockpitVisible(CAMERAS[this.camIndex] === 'cockpit');
+    this.history = [];
+    this._spawnAt(pos);
+    this.hud.sub(spec.name.toUpperCase(), 2);
+  }
+
+  // Drive the car into the crash-test wall at a set speed.
+  startCrashTest(kmh) {
+    if (!this.sandbox) return;
+    this.repairCar();
+    this._spawnAt({ x: 0, z: -240, heading: Math.PI / 2 });
+    this.crashTest = { v: kmh / 3.6, kmh, hit: false, at: 0, speed: 0 };
+    this.hud.message(`CRASH TEST · ${kmh} KM/H`, 2.5, 'warn');
+    this.hud.sub('Hands off: the car drives itself into the wall', 3);
+  }
+
+  _crashTestReport() {
+    const ct = this.crashTest, dm = this.damage;
+    const pct = Math.round(dm.total * 100);
+    const eng = dm.dead ? 'engine destroyed' : dm.engine > 0.05 ? `engine ${Math.round((1 - dm.engine) * 100)}%` : 'engine OK';
+    const parts = this.model.parts.filter((p) => p.detached).length;
+    this.hud.message(`${Math.round(ct.speed * 3.6)} KM/H IMPACT`, 4, 'warn');
+    this.hud.sub(`Damage ${pct}% · ${eng} · ${parts} part${parts === 1 ? '' : 's'} off`, 6);
+    this.crashTest = null;
+  }
+
   resetProps() {
     this.props?.reset();
     this.traffic?.reset();
@@ -1165,6 +1232,8 @@ export class Game {
     }
     this.lastImpact = worst;
     if (worst > 2) this._wallHit = true;
+    if (this.crashTest && !this.crashTest.hit && worst > 4) { this.crashTest.hit = true; this.crashTest.at = this.time; }
+    if (this.crashTest?.hit && this.time - this.crashTest.at > 2.2) this._crashTestReport();
     if (worst > 0.8) {
       this.audio.hit(worst / 12);
       this.shake = Math.max(this.shake, Math.min(1, worst / 10));

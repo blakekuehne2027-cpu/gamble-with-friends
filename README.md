@@ -109,7 +109,7 @@ Between events, earn money with **Jobs** and in the **Drag Race** betting lanes.
 
 In **Automatic**, hold the brake at a standstill to engage reverse.
 
-**Free Roam**: pick *Free Roam* on the main menu. In the Proving Grounds the pause menu has teleports (ring road, stunt park, runway, hills), *Repair car* and *Reset props*. RESET (R) puts a flipped car back on its wheels where it is.
+**Free Roam**: pick *Free Roam* on the main menu. In the Proving Grounds the pause menu has teleports (ring road, stunt park, runway, hills), *Repair car*, *Change car* (any car, swapped in place), *Crash test* (the car drives itself into the concrete wall at 50 to 200 km/h, then shows a damage report), *Reset props & traffic* and *Start police chase*. RESET (R) puts a flipped car back on its wheels where it is.
 
 **Crash damage**: *Settings → Driving → Crash damage* sets *Off*, *Cosmetic* (dents and parts only) or *Realistic* (mechanical damage too; the default). In career races a wrecked engine means a DNF, and you pay a repair bill for the damage you bring home.
 

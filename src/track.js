@@ -122,7 +122,7 @@ function sandboxFeatures() {
   F.push({ type: 'ramp', x: -380, z: 120, heading: N, len: 10, width: 6, height: 1.2 });
   // Runway with a crash-test wall at the end.
   F.push({ type: 'pad', x: -60, z: -250, heading: E, len: 620, width: 34, name: 'Runway' });
-  F.push({ type: 'block', x: 540, z: -250, heading: E, len: 3, width: 22, height: 3.2, name: 'Crash wall' });
+  F.push({ type: 'block', x: 540, z: -250, heading: E, len: 3, width: 32, height: 3.2, name: 'Crash wall' });
   // Off-road jumps in the hills.
   F.push({ type: 'ramp', x: 260, z: 170, heading: -0.6, len: 12, width: 7, height: 2.5 });
   F.push({ type: 'ramp', x: 150, z: 300, heading: 2.3, len: 12, width: 7, height: 2.8 });

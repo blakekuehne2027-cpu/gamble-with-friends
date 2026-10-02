@@ -446,6 +446,8 @@ export class UI {
       case 'free': this.setupMode = 'free'; this.show('setup'); break;
       case 'repairfree': this.game.repairCar(); this.togglePause(); break;
       case 'resetprops': this.game.resetProps(); this.togglePause(); break;
+      case 'cars': this._showOverlay('cars'); break;
+      case 'crashtests': this._showOverlay('crashtests'); break;
       case 'chase': if (this.game.police) this.game.endChase(); else this.game.startChase(); this.togglePause(); break;
       case 'settings': this.show('settings'); break;
       case 'help': this.show('help'); break;
@@ -562,6 +564,8 @@ export class UI {
         if (a.startsWith('job:')) this._startJob(this._board[+a.slice(4)]);
         else if (a.startsWith('up:')) this._buyUpgrade(a.slice(3));
         else if (a.startsWith('tp:')) { this.game.teleport(+a.slice(3)); this.togglePause(); }
+        else if (a.startsWith('swap:')) { this.game.swapCar(a.slice(5)); this.togglePause(); }
+        else if (a.startsWith('ct:')) { this.game.startCrashTest(+a.slice(3)); this.togglePause(); }
         else if (a.startsWith('mod:')) this._modAction(a.slice(4));
     }
   }
@@ -789,12 +793,29 @@ export class UI {
         <button class="btn big nav" data-act="restart">Restart</button>
         ${this.game.canRepair?.() && this.game.damage?.enabled ? '<button class="btn big nav" data-act="repair">Repair car</button>' : ''}
         ${this.game.free ? '<button class="btn big nav" data-act="replay">Watch replay</button>' : ''}
-        ${this.game.sandbox ? `<div class="tp-row">${SANDBOX_SPOTS.map((sp, i) => `<button class="btn nav" data-act="tp:${i}">${esc(sp.name)}</button>`).join('')}</div><button class="btn big nav" data-act="resetprops">Reset props &amp; traffic</button><button class="btn big nav" data-act="chase">${this.game.police ? 'End police chase' : 'Start police chase 🚨'}</button>` : ''}
+        ${this.game.sandbox ? `<div class="tp-row">${SANDBOX_SPOTS.map((sp, i) => `<button class="btn nav" data-act="tp:${i}">${esc(sp.name)}</button>`).join('')}</div><button class="btn big nav" data-act="cars">Change car</button><button class="btn big nav" data-act="crashtests">Crash test 💥</button><button class="btn big nav" data-act="resetprops">Reset props &amp; traffic</button><button class="btn big nav" data-act="chase">${this.game.police ? 'End police chase' : 'Start police chase 🚨'}</button>` : ''}
         <button class="btn big nav mod-btn" data-act="pausemods">Mod Menu${modsActive(this.mods) ? ' <small>ON</small>' : ''}</button>
         <button class="btn big nav" data-act="pauseradio">📻 ${this.S.radio < 0 ? 'Radio off' : STATIONS[this.S.radio].name}</button>
         <button class="btn big nav" data-act="quit">Quit to menu</button>
       </div>
       <p class="hint">Quitting a race early pays nothing. Settings like FFB strength are in the main menu.</p>`;
+  }
+
+  // Free roam: pick any car (mod-only ones once unlocked).
+  _overlay_cars() {
+    const list = CARS.filter((c) => !c.modOnly || this.career.owned[c.id]);
+    return `
+      <h1 class="title">Change car</h1>
+      <div class="menu-list car-pick">${list.map((c) => `<button class="btn nav" data-act="swap:${c.id}">${esc(c.name)}<small>${c.truck ? 'pickup' : `class ${c.tier}`}</small></button>`).join('')}</div>
+      <div class="menu-list row"><button class="btn ghost nav" data-act="pauseback" data-default="1">Back</button></div>`;
+  }
+
+  _overlay_crashtests() {
+    return `
+      <h1 class="title">Crash test</h1>
+      <p class="dim">The car lines up on the runway and drives itself into the concrete wall. Slow motion and a damage report follow.</p>
+      <div class="menu-list row">${[50, 80, 120, 160, 200].map((v, i) => `<button class="btn big nav" data-act="ct:${v}" ${i === 2 ? 'data-default="1"' : ''}>${v} km/h</button>`).join('')}</div>
+      <div class="menu-list row"><button class="btn ghost nav" data-act="pauseback">Back</button></div>`;
   }
 
   _overlay_pausemods() {

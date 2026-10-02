@@ -104,8 +104,11 @@ export class Traffic {
     }
     collideParked(car, carY, this.cars, onHit);
     for (const c of this.cars) {
+      // Don't draw cars far from the player.
+      const far = (c.x - car.x) ** 2 + (c.z - car.z) ** 2 > 350 * 350;
+      c.model.root.visible = !far;
       if (c.wrecked) c.update(dt, this.ground);
-      else {
+      else if (!far) {
         const m = c.model;
         m.root.position.set(c.x, this.ground(c.x, c.z, Infinity), c.z);
         m.root.rotation.set(0, c.psi, 0);
