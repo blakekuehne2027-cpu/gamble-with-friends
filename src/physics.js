@@ -30,12 +30,17 @@ export const SURFACES = {
 
 export class CarPhysics {
   constructor(spec) {
+    this.setSpec(spec);
+    this.reset(0, 0, 0);
+  }
+
+  // Swap in a new spec (upgrades / mods) without resetting the car's motion.
+  setSpec(spec) {
     this.spec = spec;
     this.L = spec.a + spec.b;
     this.mEffF = 1 / (1 / spec.mass + (spec.a * spec.a) / spec.inertia);
     this.mEffR = 1 / (1 / spec.mass + (spec.b * spec.b) / spec.inertia);
     this.maxTorque = Math.max(...spec.torque.map((p) => p[1]));
-    this.reset(0, 0, 0);
   }
 
   reset(x, z, heading) {
@@ -202,7 +207,7 @@ export class CarPhysics {
   }
 
   // ---- One physics sub-step ----
-  // inp: { throttle, brake, clutch, steer (-1..1, + = right), handbrake, autoClutch, abs, tc, stability }
+  // inp: { throttle, brake, clutch, steer (-1..1, + = right), handbrake, nitro, autoClutch, abs, tc, stability }
   // env: { mu, drag, slope (dh per metre forward) }
   step(h, inp, env) {
     const s = this.spec;
@@ -237,7 +242,9 @@ export class CarPhysics {
     this.throttleEff = throttle;
     let Te = 0;
     if (this.engineOn) {
-      const drive = this.torqueAt(rpm) * throttle;
+      // Nitrous adds torque on top of whatever the throttle asks for.
+      const boost = inp.nitro ? 1 + (s.nitroBoost || 0.6) : 1;
+      const drive = this.torqueAt(rpm) * throttle * boost;
       const braking = (1 - throttle) * (25 + rpm * 0.011);
       Te = drive - braking;
     } else {

@@ -58,12 +58,12 @@ export class Showroom {
     this.scene.add(this.turntable);
   }
 
-  setCar(spec, color) {
+  setCar(spec, color, glow = null) {
     if (this.model) {
       this.turntable.remove(this.model.root);
       this.model.dispose();
     }
-    this.model = new CarModel(spec, color, { number: 1, helmet: 0xffd200 });
+    this.model = new CarModel(spec, color, { number: 1, helmet: 0xffd200, glow });
     this.model.root.traverse((o) => { if (o.isMesh) o.castShadow = true; });
     this.model.root.position.z = -(spec.a - spec.b) / 2;
     this.turntable.add(this.model.root);

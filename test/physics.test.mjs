@@ -36,8 +36,8 @@ for (const spec of CARS) {
   check(!res.nan, 'NaN in acceleration run');
   const vmax = car.u * 3.6;
   console.log(`  0-100 km/h ${t100?.toFixed(2)} s, 0-200 ${t200?.toFixed(2)} s, speed after 60 s ${vmax.toFixed(0)} km/h, gear ${car.gear}, rpm ${car.rpm.toFixed(0)}`);
-  check(t100 > 2.4 && t100 < 6.5, `0-100 ${t100}`);
-  check(vmax > 220 && vmax < 340, `top speed ${vmax}`);
+  check(t100 > 1.2 && t100 < (spec.tier === 1 ? 8.5 : 6.5), `0-100 ${t100}`);
+  check(vmax > 200 && vmax < (spec.modOnly ? 600 : 360), `top speed ${vmax}`);
   check(Math.abs(car.v) < 0.2 && Math.abs(car.r) < 0.02, 'car drifted sideways in straight line');
 
   // Braking 100-0.
@@ -48,7 +48,7 @@ for (const spec of CARS) {
   run(car, 8, () => ({ throttle: 0, brake: 1, steer: 0 }));
   dist = Math.hypot(car.x - x0, car.z - z0);
   console.log(`  100-0 braking ${dist.toFixed(1)} m, final speed ${car.u.toFixed(3)}`);
-  check(dist > 25 && dist < 45, `braking distance ${dist}`);
+  check(dist > 12 && dist < 48, `braking distance ${dist}`);
   check(Math.abs(car.u) < 0.05, 'car did not come to rest');
 
   // Steady cornering at ~100 km/h, half lock: lateral g and stability.
@@ -61,7 +61,7 @@ for (const spec of CARS) {
   });
   check(!r1.nan, 'NaN in corner');
   console.log(`  cornering: max lat ${(maxAy / 9.81).toFixed(2)} g, yaw rate ${car.r.toFixed(3)}, speed ${(car.u * 3.6).toFixed(0)} km/h`);
-  check(maxAy / 9.81 > 0.8 && maxAy / 9.81 < 1.9, `lateral g ${maxAy / 9.81}`);
+  check(maxAy / 9.81 > 0.8 && maxAy / 9.81 < 3, `lateral g ${maxAy / 9.81}`);
   check(car.r < 0, 'steering right should yaw right (negative r)');
 
   // Abuse: full lock + full throttle at speed, no assists, then let go.

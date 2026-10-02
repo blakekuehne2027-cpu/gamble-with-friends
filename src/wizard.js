@@ -23,6 +23,7 @@ const STEPS = [
   { id: 'reset', title: 'Buttons', text: 'Press the button you want for <b>RESET CAR</b> (puts you back on track).', kind: 'button', action: 'reset', optional: 'Skip' },
   { id: 'lookBack', title: 'Buttons', text: 'Press the button you want for <b>LOOK BEHIND</b> (hold).', kind: 'button', action: 'lookBack', optional: 'Skip' },
   { id: 'handbrake', title: 'Buttons', text: 'Press the button you want for <b>HANDBRAKE</b>.', kind: 'button', action: 'handbrake', optional: 'Skip' },
+  { id: 'nitro', title: 'Buttons', text: 'Press the button you want for <b>NITRO</b> (hold it for a boost).', kind: 'button', action: 'nitro', optional: 'Skip' },
   { id: 'done', title: 'All set!', text: 'Check everything below responds correctly, then press <b>Finish</b>.', kind: 'done' },
 ];
 
@@ -343,7 +344,7 @@ export class Wizard {
       }).join('') + '</div>';
     }
     if (st.kind === 'button' || st.kind === 'done') {
-      const names = { shiftUp: 'Shift up', shiftDown: 'Shift down', camera: 'Camera', pause: 'Pause', reset: 'Reset', lookBack: 'Look back', handbrake: 'Handbrake' };
+      const names = { shiftUp: 'Shift up', shiftDown: 'Shift down', camera: 'Camera', pause: 'Pause', reset: 'Reset', lookBack: 'Look back', handbrake: 'Handbrake', nitro: 'Nitro' };
       html += '<div class="wl-buttons">' + Object.keys(names).map((k) => {
         const b = m.buttons[k];
         const on = b && this.input.buttonDown(b);

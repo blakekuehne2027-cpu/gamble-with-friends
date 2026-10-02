@@ -10,16 +10,22 @@ const COLORS = [0x1fa2ff, 0xf2b705, 0x22c55e, 0xf97316, 0xa855f7, 0xf5f5f5, 0xec
 const PACE = [0.82, 0.885, 0.935, 0.975];
 
 export class AIDriver {
-  constructor(track, idx, startS, startD, difficulty) {
+  // opts.tier: the player's car class (rivals come from the same or one class
+  // below). opts.speed: mod-menu AI speed multiplier.
+  constructor(track, idx, startS, startD, difficulty, opts = {}) {
     this.track = track;
     this.index = idx;
     this.name = NAMES[idx % NAMES.length];
     this.color = COLORS[idx % COLORS.length];
     this.number = 2 + idx * 3 + (idx % 3);
-    this.spec = CARS[(idx + 1) % CARS.length];
+    const tier = opts.tier ?? 2;
+    let pool = CARS.filter((c) => !c.modOnly && c.tier <= tier && c.tier >= tier - 1);
+    if (!pool.length) pool = CARS.filter((c) => !c.modOnly);
+    this.spec = pool[(idx + 1) % pool.length];
     // Each driver has their own pace & style.
     const base = PACE[difficulty] ?? PACE[1];
-    this.skill = base * (0.975 + ((idx * 37) % 10) / 200);
+    this.baseSkill = base * (0.975 + ((idx * 37) % 10) / 200);
+    this.skill = this.baseSkill * (opts.speed || 1);
     this.aggression = 0.4 + ((idx * 53) % 10) / 16;
     this.s = startS; // continuous distance (can exceed track length)
     this.d = startD;
@@ -50,6 +56,10 @@ export class AIDriver {
     const accel = (v) => Math.min(mu * 9.81 * 0.9, power * 0.85 / (s.mass * Math.max(v, 4))) - (0.5 * 1.2 * s.cdA * v * v) / s.mass;
     this.accel = accel;
     this.profile = this.track.speedProfile(mu, mu * 9.81 * 0.9, 95, accel);
+  }
+
+  setSpeed(mult) {
+    this.skill = this.baseSkill * (mult || 1);
   }
 
   get progress() {

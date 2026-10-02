@@ -19,10 +19,11 @@ const KEYS = {
   camera: ['KeyC'],
   lookBack: ['KeyB'],
   reset: ['KeyR'],
+  nitro: ['KeyN', 'ShiftLeft'],
   pause: ['Escape', 'KeyP'],
 };
 
-export const ACTIONS = ['shiftUp', 'shiftDown', 'camera', 'pause', 'reset', 'lookBack', 'handbrake'];
+export const ACTIONS = ['shiftUp', 'shiftDown', 'camera', 'pause', 'reset', 'lookBack', 'handbrake', 'nitro'];
 export const GEAR_KEYS = ['1', '2', '3', '4', '5', '6', 'R'];
 
 const clamp01 = (v) => (v < 0 ? 0 : v > 1 ? 1 : v);
@@ -205,6 +206,7 @@ export class Input {
       if (b(3)) down.camera = true;
       if (b(2)) down.lookBack = true;
       if (b(1)) down.handbrake = true;
+      if (b(0)) down.nitro = true;
       if (b(8)) down.reset = true;
       if (b(9)) down.pause = true;
       padMenu.up = b(12) || (pad.axes[1] || 0) < -0.6;
@@ -227,6 +229,7 @@ export class Input {
     st.source = kSteer !== 0 || kThrottle || kBrake ? 'keys' : this.lastSource;
     if (st.source === 'pad' && !pad) st.source = 'keys';
     st.handbrake = down.handbrake;
+    st.nitro = down.nitro;
     st.lookBack = down.lookBack;
     st.pressed = {};
     for (const a of ACTIONS) {

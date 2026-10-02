@@ -9,9 +9,13 @@ import { HUD } from './hud.js';
 import { Game } from './game.js';
 import { UI } from './ui.js';
 import { Showroom } from './showroom.js';
-import { CARS, PAINT_COLORS } from './cars.js';
+import { findCar, PAINT_COLORS } from './cars.js';
+import { loadCareer, loadMods, carColorIndex } from './career.js';
 
 const settings = loadSettings();
+const career = loadCareer();
+const mods = loadMods();
+if (!career.owned[settings.carId]) settings.carId = 'rookie';
 const app = document.getElementById('app');
 
 let renderer;
@@ -33,10 +37,11 @@ const audio = new AudioSystem();
 audio.volume = settings.volume;
 const ffb = new ForceFeedback();
 const hud = new HUD(document.getElementById('hud'));
-const game = new Game({ renderer, input, audio, ffb, hud, settings });
+const game = new Game({ renderer, input, audio, ffb, hud, settings, career, mods });
 const showroom = new Showroom(renderer);
-showroom.setCar(CARS[settings.car], PAINT_COLORS[settings.color] ?? CARS[settings.car].color);
-const ui = new UI({ input, audio, ffb, settings, game, showroom });
+const startCar = findCar(settings.carId);
+showroom.setCar(startCar, PAINT_COLORS[carColorIndex(career, startCar.id)], startCar.glow ?? (mods.underglow ? 0x22d3ee : null));
+const ui = new UI({ input, audio, ffb, settings, game, showroom, career, mods });
 
 // Browsers only allow audio after a click or key press.
 const unlock = () => audio.init();
@@ -56,7 +61,7 @@ resize();
 ui.show('title');
 
 // Debug/automation hook.
-window.__redline = { game, input, ui, settings, ffb, audio };
+window.__redline = { game, input, ui, settings, ffb, audio, career, mods };
 
 let last = performance.now();
 const fpsEl = document.getElementById('fps');

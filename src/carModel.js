@@ -8,6 +8,8 @@ import * as THREE from 'three';
 const STYLES = {
   gt: { len: 4.5, width: 1.9, bottom: 0.24, noseH: 0.58, hoodH: 0.86, cowl: 0.62, roofFront: -0.05, roofBack: -0.85, roofH: 1.25, deckStart: -1.5, deckH: 0.98, tailH: 1.0, wing: 'small', cabinW: 0.76 },
   proto: { len: 4.6, width: 1.95, bottom: 0.2, noseH: 0.44, hoodH: 0.78, cowl: 0.5, roofFront: -0.15, roofBack: -0.8, roofH: 1.1, deckStart: -1.35, deckH: 0.92, tailH: 0.96, wing: 'big', cabinW: 0.66 },
+  coupe: { len: 4.2, width: 1.82, bottom: 0.24, noseH: 0.62, hoodH: 0.9, cowl: 0.55, roofFront: -0.1, roofBack: -0.9, roofH: 1.32, deckStart: -1.4, deckH: 0.98, tailH: 0.98, wing: 'none', cabinW: 0.8 },
+  hyper: { len: 4.8, width: 2.05, bottom: 0.16, noseH: 0.38, hoodH: 0.72, cowl: 0.45, roofFront: -0.2, roofBack: -0.75, roofH: 1.05, deckStart: -1.25, deckH: 0.88, tailH: 0.92, wing: 'big', cabinW: 0.62 },
   muscle: { len: 4.75, width: 1.95, bottom: 0.26, noseH: 0.72, hoodH: 0.95, cowl: 0.55, roofFront: -0.05, roofBack: -0.95, roofH: 1.32, deckStart: -1.65, deckH: 1.05, tailH: 1.04, wing: 'duck', cabinW: 0.8 },
 };
 
@@ -86,6 +88,22 @@ function numberTexture(num, color) {
   return t;
 }
 
+let _glowTex = null;
+function glowTexture() {
+  if (_glowTex) return _glowTex;
+  const c = document.createElement('canvas');
+  c.width = c.height = 128;
+  const g = c.getContext('2d');
+  const grd = g.createRadialGradient(64, 64, 6, 64, 64, 64);
+  grd.addColorStop(0, 'rgba(255,255,255,0.95)');
+  grd.addColorStop(0.45, 'rgba(255,255,255,0.45)');
+  grd.addColorStop(1, 'rgba(255,255,255,0)');
+  g.fillStyle = grd;
+  g.fillRect(0, 0, 128, 128);
+  _glowTex = new THREE.CanvasTexture(c);
+  return _glowTex;
+}
+
 function makeWheel(R, left, mats) {
   const pivot = new THREE.Group();
   const spin = new THREE.Group();
@@ -113,7 +131,7 @@ function makeWheel(R, left, mats) {
 }
 
 export class CarModel {
-  constructor(spec, color, { number = 7, cockpit = false, helmet = 0xffffff } = {}) {
+  constructor(spec, color, { number = 7, cockpit = false, helmet = 0xffffff, glow = null } = {}) {
     this.spec = spec;
     const st = STYLES[spec.style] || STYLES.gt;
     this.style = st;
@@ -288,6 +306,31 @@ export class CarModel {
     this.eye = new THREE.Vector3(driverX, eyeY, eyeZ);
     this.hoodCam = new THREE.Vector3(0, st.hoodH + 0.35, st.cowl + zOff + 0.2);
     if (cockpit) this._buildCockpit(st, zOff, driverX, cabW);
+
+    // Nitrous flames out of the exhausts.
+    const flameMat = new THREE.MeshBasicMaterial({ color: 0x5ab4ff, transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide });
+    const coreMat = new THREE.MeshBasicMaterial({ color: 0xeaf6ff, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide });
+    const flameGeo = cached('flame', () => new THREE.ConeGeometry(0.1, 0.85, 10, 1, true).translate(0, 0.425, 0).rotateX(-Math.PI / 2));
+    this.flames = [];
+    for (const sx of [1, -1]) {
+      const f = new THREE.Group();
+      f.position.set(sx * 0.35, st.bottom + 0.12, -st.len / 2 + zOff - 0.1);
+      f.add(new THREE.Mesh(flameGeo, flameMat));
+      const core = new THREE.Mesh(flameGeo, coreMat);
+      core.scale.set(0.5, 0.5, 0.55);
+      f.add(core);
+      f.visible = false;
+      this.body.add(f);
+      this.flames.push(f);
+    }
+
+    // Underglow (neon strip light on the ground under the car).
+    this.glowMat = new THREE.MeshBasicMaterial({ map: glowTexture(), color: 0x22d3ee, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -8 });
+    this.glow = new THREE.Mesh(cached('glow' + key, () => new THREE.PlaneGeometry(st.width + 1.6, st.len + 1.4).rotateX(-Math.PI / 2)), this.glowMat);
+    this.glow.position.set(0, 0.04, zOff);
+    this.glow.renderOrder = 2;
+    this.root.add(this.glow);
+    this.setGlow(glow);
   }
 
   _buildCockpit(st, zOff, driverX, cabW) {
@@ -450,6 +493,26 @@ export class CarModel {
     g.fillStyle = '#7fd4ff';
     g.fillText(extra, 246, 30);
     this.displayTex.needsUpdate = true;
+  }
+
+  setGlow(hex) {
+    this.glow.visible = hex !== null && hex !== undefined;
+    if (this.glow.visible) this.glowMat.color.setHex(hex);
+  }
+
+  setGlowColor(color) {
+    if (this.glow.visible) this.glowMat.color.copy(color);
+  }
+
+  setNitro(on, t) {
+    for (let i = 0; i < this.flames.length; i++) {
+      const f = this.flames[i];
+      f.visible = on;
+      if (on) {
+        const k = 0.75 + Math.abs(Math.sin(t * 47 + i * 2.1)) * 0.5 + Math.random() * 0.2;
+        f.scale.set(1, 1, k);
+      }
+    }
   }
 
   setColor(hex) {

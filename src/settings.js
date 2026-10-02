@@ -22,8 +22,7 @@ export const DEFAULTS = {
   opponents: 5,
   difficulty: 1, // 0 easy, 1 medium, 2 hard, 3 pro
   track: 0,
-  car: 0,
-  color: 0,
+  carId: 'rookie',
   showTelemetry: true,
   graphics: 'high',
 };
@@ -31,7 +30,12 @@ export const DEFAULTS = {
 export function loadSettings() {
   try {
     const raw = localStorage.getItem(KEY);
-    if (raw) return { ...DEFAULTS, ...JSON.parse(raw) };
+    if (raw) {
+      const s = { ...DEFAULTS, ...JSON.parse(raw) };
+      delete s.car; // pre-career saves stored a car index
+      delete s.color;
+      return s;
+    }
   } catch (e) { /* ignore */ }
   return { ...DEFAULTS };
 }

@@ -132,6 +132,7 @@ export class AudioSystem {
     this.wind = loop('lowpass', 700, 0.5);
     this.rumble = loop('lowpass', 140, 1);
     this.gravel = loop('bandpass', 2400, 0.7);
+    this.hiss = loop('highpass', 2600, 0.7);
     this.enabled = true;
   }
 
@@ -156,7 +157,7 @@ export class AudioSystem {
     if (s.paused) {
       this.player.silence();
       this.ai?.silence();
-      for (const n of [this.squeal, this.squeal2, this.wind, this.rumble, this.gravel]) n.g.gain.setTargetAtTime(0, t, 0.05);
+      for (const n of [this.squeal, this.squeal2, this.wind, this.rumble, this.gravel, this.hiss]) n.g.gain.setTargetAtTime(0, t, 0.05);
       return;
     }
     this.player.update(s.rpm, s.engineOn ? s.throttle : 0, s.engineOn ? 1 : 0);
@@ -169,6 +170,7 @@ export class AudioSystem {
     this.wind.f.frequency.setTargetAtTime(400 + w * 1400, t, 0.1);
     this.rumble.g.gain.setTargetAtTime((s.kerb ? 0.7 : 0) + (s.grass ? 0.35 : 0) * Math.min(1, s.speed / 10), t, 0.03);
     this.gravel.g.gain.setTargetAtTime(s.grass ? Math.min(0.12, s.speed / 150) : 0, t, 0.05);
+    this.hiss.g.gain.setTargetAtTime(s.nitro ? 0.13 : 0, t, s.nitro ? 0.03 : 0.15);
     if (this.ai) {
       if (s.aiDist !== undefined && s.aiDist < 120) {
         const vol = Math.max(0, 1 - s.aiDist / 120) ** 2 * 0.6;
@@ -218,6 +220,25 @@ export class AudioSystem {
     this._tone({ freq: 70 + Math.random() * 40, dur: 0.07, gain: 0.35, type: 'triangle', slide: -30 });
   }
 
+  nitroStart() {
+    if (!this.ctx) return;
+    const ctx = this.ctx, t = ctx.currentTime;
+    const src = ctx.createBufferSource();
+    src.buffer = this.noiseBuf;
+    const f = ctx.createBiquadFilter();
+    f.type = 'bandpass';
+    f.Q.value = 1.4;
+    f.frequency.setValueAtTime(350, t);
+    f.frequency.exponentialRampToValueAtTime(3200, t + 0.45);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.5, t + 0.06);
+    g.gain.exponentialRampToValueAtTime(0.001, t + 0.6);
+    src.connect(f).connect(g).connect(this.master);
+    src.start(t);
+    src.stop(t + 0.7);
+  }
+
   shift() {
     this._burst({ dur: 0.05, freq: 3000, q: 2, gain: 0.25, type: 'highpass' });
     this._tone({ freq: 160, dur: 0.06, gain: 0.15, type: 'square', slide: -80 });
@@ -247,6 +268,12 @@ export class AudioSystem {
 
   starter() {
     for (let i = 0; i < 5; i++) this._tone({ freq: 55 + i * 3, dur: 0.1, gain: 0.25, type: 'sawtooth', delay: i * 0.09 });
+  }
+
+  cash() {
+    this._tone({ freq: 1568, dur: 0.12, gain: 0.18, type: 'triangle' });
+    this._tone({ freq: 2093, dur: 0.35, gain: 0.18, type: 'triangle', delay: 0.09 });
+    this._burst({ dur: 0.06, freq: 5000, q: 2, gain: 0.15, type: 'highpass', delay: 0.02 });
   }
 
   click() {

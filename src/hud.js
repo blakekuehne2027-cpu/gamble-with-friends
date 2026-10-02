@@ -38,7 +38,8 @@ export class HUD {
           <div class="hud-gear" id="h-gear">N</div>
           <div class="hud-speed"><b id="h-speed">0</b><small id="h-unit">MPH</small></div>
         </div>
-        <div class="hud-flags"><span id="h-abs">ABS</span><span id="h-tc">TC</span><span id="h-clutch">AUTO CLUTCH</span><span id="h-trans">H</span></div>
+        <div class="hud-nitro" id="h-nitro"><label>NITRO</label><div><i id="h-nitrofill"></i></div></div>
+        <div class="hud-flags"><span id="h-mods" class="mods">MODS</span><span id="h-abs">ABS</span><span id="h-tc">TC</span><span id="h-clutch">AUTO CLUTCH</span><span id="h-trans">H</span></div>
       </div>
       <div class="hud-bl" id="h-tele">
         <svg class="hud-wheel" id="h-wheel" viewBox="-50 -50 100 100"><circle r="40" fill="none" stroke="currentColor" stroke-width="9"/><rect x="-40" y="-4" width="80" height="8" fill="currentColor"/><rect x="-4" y="0" width="8" height="40" fill="currentColor"/><rect x="-3" y="-49" width="6" height="12" fill="#ffd200"/></svg>
@@ -58,12 +59,14 @@ export class HUD {
         </svg>
       </div>
       <div class="hud-msg" id="h-msg"></div>
+      <div class="hud-drift" id="h-drift"></div>
+      <div class="hud-cash" id="h-cash"></div>
       <div class="hud-sub" id="h-sub"></div>
       <div class="hud-lights" id="h-lights"><i></i><i></i><i></i><i></i><i></i></div>
     `;
     const $ = (id) => root.querySelector('#' + id);
     this.el = {};
-    for (const id of ['pos', 'of', 'lap', 'laps', 'board', 'cur', 'last', 'best', 'delta', 'map', 'leds', 'rpmfill', 'rpmred', 'gear', 'speed', 'unit', 'abs', 'tc', 'clutch', 'trans', 'tele', 'wheel', 'pc', 'pb', 'pt', 'hp', 'knob', 'msg', 'sub', 'lights']) {
+    for (const id of ['pos', 'of', 'lap', 'laps', 'board', 'cur', 'last', 'best', 'delta', 'map', 'leds', 'rpmfill', 'rpmred', 'gear', 'speed', 'unit', 'abs', 'tc', 'clutch', 'trans', 'tele', 'wheel', 'pc', 'pb', 'pt', 'hp', 'knob', 'msg', 'sub', 'lights', 'nitro', 'nitrofill', 'mods', 'drift', 'cash']) {
       this.el[id] = $('h-' + id);
     }
     this.ledEls = [];
@@ -217,6 +220,39 @@ export class HUD {
       this.subTimer -= d.dt;
       if (this.subTimer <= 0) e.sub.classList.remove('show');
     }
+  }
+
+  // frac 0..1, or -1 to hide the bar (car has no nitrous).
+  setNitro(frac, active = false) {
+    const e = this.el;
+    e.nitro.style.display = frac < 0 ? 'none' : '';
+    if (frac >= 0) {
+      e.nitrofill.style.transform = `scaleX(${frac.toFixed(3)})`;
+      e.nitro.classList.toggle('on', active);
+    }
+  }
+
+  setModsBadge(on) {
+    this.el.mods.style.display = on ? '' : 'none';
+  }
+
+  setDrift(points, mult) {
+    const t = points > 0 ? `DRIFT ${points}${mult > 1 ? ` ×${mult}` : ''}` : '';
+    if (this.cache.drift !== t) {
+      this.cache.drift = t;
+      this.el.drift.textContent = t;
+      this.el.drift.classList.toggle('show', !!t);
+    }
+  }
+
+  // Floating bonus text (cash, overtakes, speed trap...).
+  cash(text, bad = false) {
+    const d = document.createElement('div');
+    d.className = 'cash-pop' + (bad ? ' bad' : '');
+    d.textContent = text;
+    this.el.cash.appendChild(d);
+    setTimeout(() => d.remove(), 2200);
+    while (this.el.cash.children.length > 4) this.el.cash.firstChild.remove();
   }
 
   message(text, seconds = 2, cls = '') {
