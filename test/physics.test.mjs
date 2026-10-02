@@ -36,8 +36,8 @@ for (const spec of CARS) {
   check(!res.nan, 'NaN in acceleration run');
   const vmax = car.u * 3.6;
   console.log(`  0-100 km/h ${t100?.toFixed(2)} s, 0-200 ${t200?.toFixed(2)} s, speed after 60 s ${vmax.toFixed(0)} km/h, gear ${car.gear}, rpm ${car.rpm.toFixed(0)}`);
-  check(t100 > 1.2 && t100 < (spec.tier <= 1 ? 8.5 : 6.5), `0-100 ${t100}`);
-  check(vmax > 200 && vmax < (spec.modOnly ? 600 : 360), `top speed ${vmax}`);
+  check(t100 > 1.2 && t100 < (spec.tier <= 1 || spec.truck ? 8.5 : 6.5), `0-100 ${t100}`);
+  check(vmax > (spec.truck ? 160 : 200) && vmax < (spec.modOnly ? 600 : 360), `top speed ${vmax}`);
   check(Math.abs(car.v) < 0.2 && Math.abs(car.r) < 0.02, 'car drifted sideways in straight line');
 
   // Braking 100-0.

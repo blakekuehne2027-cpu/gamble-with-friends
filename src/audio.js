@@ -262,6 +262,29 @@ export class AudioSystem {
     if (g > 0.4) this._burst({ dur: 0.18, freq: 3500, q: 1.5, gain: 0.2 * g });
   }
 
+  // Police siren (a wailing tone), level 0..1 by distance.
+  siren(level) {
+    if (!this.ctx) return;
+    const ctx = this.ctx, t = ctx.currentTime;
+    if (!this.sirenN) {
+      if (level <= 0) return;
+      const o = ctx.createOscillator(), lfo = ctx.createOscillator(), depth = ctx.createGain(), f = ctx.createBiquadFilter(), g = ctx.createGain();
+      o.type = 'sawtooth';
+      o.frequency.value = 980;
+      lfo.frequency.value = 0.32;
+      depth.gain.value = 430;
+      lfo.connect(depth).connect(o.frequency);
+      f.type = 'bandpass';
+      f.frequency.value = 1300;
+      f.Q.value = 0.8;
+      g.gain.value = 0;
+      o.connect(f).connect(g).connect(this.master);
+      o.start(); lfo.start();
+      this.sirenN = { o, lfo, g };
+    }
+    this.sirenN.g.gain.setTargetAtTime(Math.max(0, Math.min(1, level)) * 0.11, t, 0.15);
+  }
+
   // Metal crunch for parts breaking off.
   crunch(strength) {
     const s = Math.min(1, strength);

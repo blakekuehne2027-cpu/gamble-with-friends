@@ -317,6 +317,8 @@ export class UI {
           ${this._optRow('brakeCurve', 'Brake pedal feel', BRAKE_FEEL[S.brakeCurve] || 'Medium')}
           ${this._optRow('brakeStrength', 'Brake strength', pct(S.brakeStrength))}
           ${this._optRow('damage', 'Crash damage', DAMAGE_NAMES[S.damage] || 'Realistic')}
+          ${this._optRow('crashCam', 'Slow-mo on big crashes (free roam)', onoff(S.crashCam !== false))}
+          ${this._optRow('traffic', 'Traffic in the Proving Grounds', onoff(S.traffic !== false))}
           ${this._optRow('tc', 'Traction control', onoff(S.tc))}
           ${this._optRow('stability', 'Stability assist', onoff(S.stability))}
           <h4>Wheel</h4>
@@ -444,6 +446,7 @@ export class UI {
       case 'free': this.setupMode = 'free'; this.show('setup'); break;
       case 'repairfree': this.game.repairCar(); this.togglePause(); break;
       case 'resetprops': this.game.resetProps(); this.togglePause(); break;
+      case 'chase': if (this.game.police) this.game.endChase(); else this.game.startChase(); this.togglePause(); break;
       case 'settings': this.show('settings'); break;
       case 'help': this.show('help'); break;
       case 'wizard': this.openWizard(); break;
@@ -785,7 +788,8 @@ export class UI {
         <button class="btn big nav" data-act="resume" data-default="1">Resume</button>
         <button class="btn big nav" data-act="restart">Restart</button>
         ${this.game.canRepair?.() && this.game.damage?.enabled ? '<button class="btn big nav" data-act="repair">Repair car</button>' : ''}
-        ${this.game.sandbox ? `<div class="tp-row">${SANDBOX_SPOTS.map((sp, i) => `<button class="btn nav" data-act="tp:${i}">${esc(sp.name)}</button>`).join('')}</div><button class="btn big nav" data-act="resetprops">Reset props</button>` : ''}
+        ${this.game.free ? '<button class="btn big nav" data-act="replay">Watch replay</button>' : ''}
+        ${this.game.sandbox ? `<div class="tp-row">${SANDBOX_SPOTS.map((sp, i) => `<button class="btn nav" data-act="tp:${i}">${esc(sp.name)}</button>`).join('')}</div><button class="btn big nav" data-act="resetprops">Reset props &amp; traffic</button><button class="btn big nav" data-act="chase">${this.game.police ? 'End police chase' : 'Start police chase 🚨'}</button>` : ''}
         <button class="btn big nav mod-btn" data-act="pausemods">Mod Menu${modsActive(this.mods) ? ' <small>ON</small>' : ''}</button>
         <button class="btn big nav" data-act="pauseradio">📻 ${this.S.radio < 0 ? 'Radio off' : STATIONS[this.S.radio].name}</button>
         <button class="btn big nav" data-act="quit">Quit to menu</button>
@@ -1225,7 +1229,7 @@ export class UI {
       if (m.up || m.down || st.pressed.camera) r.cycleCam();
       if (m.back || st.pressed.pause) {
         this.game.stopReplay();
-        this.mode = 'results';
+        this.mode = this.replayReturn === 'pause' ? 'pause' : 'results';
         this._showOverlay(this.replayReturn || 'results');
       }
     } else if (this.mode === 'race') {

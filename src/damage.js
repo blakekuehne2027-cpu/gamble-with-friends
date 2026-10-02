@@ -65,6 +65,7 @@ export class CarDamage {
     _D.set(nx, ny, nz).applyQuaternion(_q).normalize();
     const sev = speed - 1.8; // severity in m/s above "a tap"
     this.lastSev = Math.max(this.lastSev || 0, speed);
+    if (speed > 16) this.events.push({ type: 'big', speed });
     const depth = Math.min(0.5, sev * 0.028);
     const radius = Math.min(1.5, 0.55 + sev * 0.035);
     m.crush(_P, _D, depth, radius);

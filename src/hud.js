@@ -75,6 +75,7 @@ export class HUD {
         </div>
       </div>
       <div class="hud-shift" id="h-shift">SHIFT</div>
+      <div class="hud-chase" id="h-chase"><b>🚨 WANTED</b><span id="h-chase-txt"></span><div class="cbar"><i id="h-chase-esc"></i></div><div class="cbar bust"><i id="h-chase-bust"></i></div></div>
       <div class="hud-dmg" id="h-dmg">
         <svg viewBox="0 0 64 104" class="dmg-car">
           <rect x="14" y="8" width="36" height="88" rx="10" fill="rgba(255,255,255,0.06)" stroke="rgba(255,255,255,0.25)" stroke-width="1.5"/>
@@ -96,7 +97,7 @@ export class HUD {
     `;
     const $ = (id) => root.querySelector('#' + id);
     this.el = {};
-    for (const id of ['pos', 'of', 'lap', 'laps', 'board', 'cur', 'last', 'best', 'delta', 'map', 'leds', 'rpmfill', 'rpmred', 'gear', 'speed', 'unit', 'abs', 'tc', 'clutch', 'trans', 'tele', 'wheel', 'pc', 'pb', 'pt', 'hp', 'knob', 'msg', 'sub', 'lights', 'nitro', 'nitrofill', 'mods', 'drift', 'cash', 'drag', 'dragname2', 'dragtime', 'dragyou', 'dragthem', 'shift', 'tree-you', 'tree-them', 'job', 'jobtitle', 'jobtimer', 'jobl1', 'jobl2', 'rewind', 'replay', 'rptime', 'rpfill', 'rpcam', 'dmg', 'dmg-eng', 'dmg-temp', 'dz-front', 'dz-rear', 'dz-left', 'dz-right', 'dz-top', 'dw-0', 'dw-1', 'dw-2', 'dw-3']) {
+    for (const id of ['pos', 'of', 'lap', 'laps', 'board', 'cur', 'last', 'best', 'delta', 'map', 'leds', 'rpmfill', 'rpmred', 'gear', 'speed', 'unit', 'abs', 'tc', 'clutch', 'trans', 'tele', 'wheel', 'pc', 'pb', 'pt', 'hp', 'knob', 'msg', 'sub', 'lights', 'nitro', 'nitrofill', 'mods', 'drift', 'cash', 'drag', 'dragname2', 'dragtime', 'dragyou', 'dragthem', 'shift', 'tree-you', 'tree-them', 'job', 'jobtitle', 'jobtimer', 'jobl1', 'jobl2', 'rewind', 'replay', 'rptime', 'rpfill', 'rpcam', 'dmg', 'dmg-eng', 'dmg-temp', 'chase', 'chase-txt', 'chase-esc', 'chase-bust', 'dz-front', 'dz-rear', 'dz-left', 'dz-right', 'dz-top', 'dw-0', 'dw-1', 'dw-2', 'dw-3']) {
       this.el[id] = $('h-' + id);
     }
     this.ledEls = [];
@@ -275,6 +276,16 @@ export class HUD {
     e['dmg-eng'].style.color = d.dead ? '#ef4444' : col(d.engine);
     this._set('dmgtemp', e['dmg-temp'], d.radiator > 0.25 || d.temp > 100 ? `${Math.round(d.temp)}°C` : '');
     e['dmg-temp'].classList.toggle('hot', d.temp > 112);
+  }
+
+  // Police chase: distance to the nearest cop, escape and bust progress.
+  setChase(c) {
+    const e = this.el;
+    e.chase.classList.toggle('show', !!c);
+    if (!c) return;
+    this._set('chasetxt', e['chase-txt'], `${c.left} cop${c.left === 1 ? '' : 's'} · nearest ${Math.round(c.near)} m`);
+    e['chase-esc'].style.transform = `scaleX(${Math.min(1, c.escape).toFixed(3)})`;
+    e['chase-bust'].style.transform = `scaleX(${Math.min(1, c.bust).toFixed(3)})`;
   }
 
   setReplay(on) {

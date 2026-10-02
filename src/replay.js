@@ -4,11 +4,12 @@
 import * as THREE from 'three';
 
 const RATE = 1 / 30;
-const P = 13; // floats per player frame
+const P = 14; // floats per player frame
 const A = 7; // floats per other car
 export const REPLAY_CAMS = ['tv', 'chase', 'heli', 'bumper'];
 const CAM_NAMES = { tv: 'TV CAMERAS', chase: 'CHASE', heli: 'HELICOPTER', bumper: 'BUMPER' };
 
+const _qa = new THREE.Quaternion(), _qb = new THREE.Quaternion();
 const wrapPi = (a) => {
   while (a > Math.PI) a -= Math.PI * 2;
   while (a < -Math.PI) a += Math.PI * 2;
@@ -30,10 +31,13 @@ export class ReplayRecorder {
     const others = game._replayOthers();
     const f = new Float32Array(1 + P + others.length * A);
     f[0] = game.time;
-    f.set([c.x, game.carY, c.z, c.psi, m.root.rotation.x, m.body.rotation.x, m.body.rotation.z, c.delta,
-      m.wheels[0].spin.rotation.x, m.wheels[2].spin.rotation.x, (game.input.state.brake > 0.05 ? 1 : 0) | (game.nitroOn ? 2 : 0), c.rpm, c.throttleEff], 1);
+    const rq = m.root.quaternion;
+    f.set([c.x, game.carY, c.z, rq.x, rq.y, rq.z, rq.w, c.delta,
+      m.wheels[0].spin.rotation.x, m.wheels[2].spin.rotation.x, (game.input.state.brake > 0.05 ? 1 : 0) | (game.nitroOn ? 2 : 0), c.rpm, c.throttleEff, c.psi], 1);
     others.forEach((o, i) => f.set([o.x, o.y, o.z, o.psi, o.steer, o.spin, o.braking ? 1 : 0], 1 + P + i * A));
     this.frames.push(f);
+    // Free roam can run forever: keep the last two minutes.
+    if (this.frames.length > 3600) this.frames.splice(0, this.frames.length - 3600);
   }
 
   // Rewind support: forget frames after time t.
@@ -117,11 +121,13 @@ export class ReplayPlayer {
     const Lang = (j) => a[j] + wrapPi(b[j] - a[j]) * k;
     // Player car.
     const m = g.model;
-    const px = L(1), py = L(2), pz = L(3), psi = Lang(4);
+    const px = L(1), py = L(2), pz = L(3), psi = Lang(14);
     m.root.position.set(px, py, pz);
-    m.root.rotation.set(L(5), psi, 0, 'YXZ');
+    _qa.set(a[4], a[5], a[6], a[7]);
+    _qb.set(b[4], b[5], b[6], b[7]);
+    m.root.quaternion.slerpQuaternions(_qa, _qb, k);
     const flags = a[11];
-    m.update(dt, { steerRoad: L(8), spinFront: L(9), spinRear: L(10), braking: !!(flags & 1), pitch: L(6), roll: L(7), wheelDeg: 0, lights: g.night });
+    m.update(dt, { steerRoad: L(8), spinFront: L(9), spinRear: L(10), braking: !!(flags & 1), pitch: 0, roll: 0, wheelDeg: 0, lights: g.night });
     m.setNitro(!!(flags & 2), g.time);
     // Other cars.
     const models = g._replayModels();

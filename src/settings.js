@@ -11,6 +11,8 @@ export const DEFAULTS = {
   brakeCurve: 1.8, // pedal-to-brake curve: 1 = linear, higher = gentler at light pressure
   brakeStrength: 0.85, // brake force at a fully pressed pedal
   damage: 'full', // 'off' | 'visual' | 'full' (mechanical damage too)
+  crashCam: true, // slow motion for a moment after a big crash (free roam)
+  traffic: true, // road traffic in the Proving Grounds
   wheelRange: 900, // what the wheel is set to in G HUB / driver
   steerRatio: 12, // degrees of wheel rotation per degree of road-wheel angle
   ffb: true,

@@ -8,7 +8,10 @@ A 3D racing game that runs in your browser, built for the **Logitech G29 / G920 
 - **Cockpit view** with a steering wheel that turns 1:1 with yours, rev LEDs and a gear/speed display. Bonnet and chase cams too.
 - **BeamNG-style crashes**: cars crumple where they hit, and bumpers, the bonnet, doors, mirrors, wings, lights and even wheels break off and bounce down the road. Damage is mechanical too: engine power loss and misfires, a cracked radiator that overheats the engine, bent wheels that pull the steering, punctures, and engines that die in smoke and flames.
 - **Real suspension, jumps and rollovers**: each wheel rides on its own spring over the ground, so cars roll, dive, fly off crests and ramps (throttle/brake in the air tips the nose up/down), bottom out on hard landings, trip over when they slide sideways into the dirt, and tumble end over end.
-- **Free Roam on the Proving Grounds**: an open sandbox map with a stunt park (kickers, a mega ramp, a tabletop, a jump over parked cars, bowling), a 600 m runway with cones, a barrel wall and a crash-test wall, off-road hills and a ring road. Free Roam works on every circuit too.
+- **Free Roam on the Proving Grounds**: an open sandbox map with a stunt park (kickers, a mega ramp, a tabletop, a jump over parked cars, bowling), a 600 m runway with cones, a barrel wall and a crash-test wall, off-road hills and a ring road full of traffic you can wreck. Free Roam works on every circuit too.
+- **Police chases**: start one from the pause menu (or wreck enough traffic and someone calls them in). Interceptors hunt you down and try to ram and box you in: get 350 m away and stay gone to escape (+$2,000), or stop with a cop on you and get busted (fined). Sirens, light bars and all.
+- **Hauler 4x4 pickup**: a heavy V8 truck on tall tyres. Great off-road, and its high centre of gravity means it will roll over if you push it.
+- **Crash cam**: big crashes in free roam drop into slow motion for a moment, and *Watch replay* in the pause menu shows the last two minutes from TV cameras.
 - **Story mode, UNDERDOG**: you're broke, driving a $500 rust bucket. Work jobs, race your way up, and bet your pink slip against the street kings, all the way to Viktor "King" Kane. Lose a pink-slip race and you lose the car. Lose your last one and you're back in the junker.
 - **3 circuits plus a dragstrip**: *Coastline GP* (ocean and mountains), *Pinewood Ring* (hilly forest), *Midnight Circuit* (city streets) and *Thunder Valley Dragway*.
 - **Weather and time of day**: race any track by day, at sunset or at night, dry or in the **rain** (less grip, spray, wet roads that shine under the lights).
@@ -63,6 +66,7 @@ Between events, earn money with **Jobs** and in the **Drag Race** betting lanes.
 |---|---|---|
 | Rust Bucket | story mode only | 0 |
 | Rookie Coupe | $8,000 (free with a new free-play career) | 1 |
+| Hauler 4x4 (pickup) | $26,000 | 2 |
 | Vortex GT | $30,000 | 2 |
 | Raptor R | $45,000 | 3 |
 | Titan V12 | $70,000 | 3 |
@@ -144,6 +148,8 @@ Source layout (`src/`):
 | `damage.js` | Crash damage: dents, parts breaking off, debris, mechanical damage |
 | `chassis.js` | Suspension, airtime, landings and the 3D tumbling body for rollovers |
 | `props.js` | Sandbox props (cones, barrels, crates, pins, barriers, parked cars) |
+| `traffic.js` | Ring-road traffic for free roam |
+| `police.js` | Police chases: interceptor AI, ramming, escape/bust rules |
 | `radio.js` | Procedural music radio (sequencer, synths, drums, song generator) |
 | `track.js` | Track layouts, spline sampling, racing line, AI speed profiles, terrain height |
 | `world.js` | Builds the 3D scene: terrain, road, kerbs, walls, trees, grandstands, start lights, city, ocean, dragstrip, time-of-day lighting and rain |

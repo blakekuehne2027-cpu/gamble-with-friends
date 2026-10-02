@@ -18,6 +18,8 @@ import { ReplayRecorder, ReplayPlayer } from './replay.js';
 import { CarDamage, Debris } from './damage.js';
 import { Chassis, Tumble } from './chassis.js';
 import { Props } from './props.js';
+import { Traffic } from './traffic.js';
+import { Police } from './police.js';
 
 const STEP = 1 / 240;
 const CAMERAS = ['cockpit', 'hood', 'chase', 'far'];
@@ -96,6 +98,7 @@ export class Game {
     this.skids = new SkidMarks(this.scene);
     this.debris = new Debris(this.scene, (x, z) => track.heightAt(x, z), (x, z) => this._debrisBounds(x, z));
     this.misfireT = 0;
+    this.slowmoT = 0;
     this.retired = false;
     this.retireAt = 0;
     this.smokeT = 0;
@@ -141,6 +144,14 @@ export class Game {
     if (this.sandbox) {
       this.props = new Props(this.scene, this._groundFn, S.damage || 'full');
       this.props.populate();
+    }
+    this.police?.dispose();
+    this.police = null;
+    this.wreckedTraffic = 0;
+    this.traffic = null;
+    if (this.sandbox && this.free && S.traffic !== false) {
+      this.traffic = new Traffic(this.scene, track, this._groundFn, S.damage || 'full', 14);
+      this.traffic.night = this.night;
     }
 
     // Session state.
@@ -251,6 +262,9 @@ export class Game {
   stop() {
     if (!this.active) return;
     this.active = false;
+    this.audio.siren(0);
+    this.police?.dispose();
+    this.police = null;
     this.ffb.setForce(0);
     this._stopRumble();
     this.ffb.setLeds(0);
@@ -273,6 +287,7 @@ export class Game {
   setPaused(p) {
     this.paused = p;
     if (p) {
+      this.audio.siren(0);
       this.ffb.setForce(0);
       this._stopRumble();
       this.audio.update({ paused: true });
@@ -298,6 +313,11 @@ export class Game {
     if (this.paused) return;
     dt = Math.min(dt, 1 / 20);
     if (this.mods.slowmo) dt *= 0.5;
+    // Crash cam: a moment of slow motion after a big hit (free roam).
+    if (this.slowmoT > 0) {
+      this.slowmoT -= dt;
+      dt *= this.slowmoT > 0.4 ? 0.3 : 0.3 + (0.4 - this.slowmoT) * 1.75;
+    }
     this.time += dt;
     this.frame++;
     const S = this.settings;
@@ -416,6 +436,7 @@ export class Game {
     this._collideWalls();
     if (!this.mods.ghost) this._collideCars(dt);
     if (this.props) this._updateProps(dt);
+    if (this.police) this._updatePolice(dt);
     this._damageFx(dt);
     this._progress(dt);
     this._scoring(dt);
@@ -779,7 +800,8 @@ export class Game {
   _updateProps(dt) {
     const st = this.model.style;
     this._propDims = this._propDims || { len: st.len, width: st.width, zOff: (this.spec.a - this.spec.b) / 2 };
-    this.props.update(dt, this.tumble.active ? { ...this.car, velocityAt: () => ({ x: 0, z: 0 }), applyImpulse() {}, spec: this.spec } : this.car, this.carY, this._propDims, (sev, x, z, nx, nz, sound, speed, pc) => {
+    const body = this.tumble.active ? { ...this.car, velocityAt: () => ({ x: 0, z: 0 }), applyImpulse() {}, spec: this.spec } : this.car;
+    const onHit = this._propHit || (this._propHit = (sev, x, z, nx, nz, sound, speed, pc) => {
       if (sev > 1.5) this.damage.impact(x, this.carY + 0.4, z, nx, nz, sev);
       if (sound === 'car' || sound === 'concrete') {
         this.audio.hit(Math.min(1, speed / 14));
@@ -787,11 +809,18 @@ export class Game {
         this.shake = Math.max(this.shake, Math.min(0.9, speed / 12));
         this.ffbJolt = Math.min(0.9, speed / 9) * (Math.random() < 0.5 ? -1 : 1);
         if (pc && pc.damage.events.length) this._damageEvents(pc.damage, 0, 0, false);
+        // Wreck enough traffic and somebody calls the cops.
+        if (pc && pc.wrecked && !pc.reported) {
+          pc.reported = true;
+          if (++this.wreckedTraffic >= 2 && !this.police && this.free) { this.startChase(); this.hud.sub("YOU'VE BEEN REPORTED!", 3); }
+        }
       } else {
         this.audio.thunk(sound, Math.min(1, speed / 12));
         this.ffbJolt = Math.max(this.ffbJolt, Math.min(0.35, speed / 30));
       }
     });
+    this.props.update(dt, body, this.carY, this._propDims, onHit);
+    if (this.traffic) this.traffic.update(dt, body, this.carY, { pos: this.trackPos }, onHit);
     for (const e of this.props.events) {
       if (e.type === 'bowl') {
         if (e.down >= 10) { this.hud.message('STRIKE!', 3, 'go'); unlock('strike', this.career); this.audio.cash(); }
@@ -801,8 +830,60 @@ export class Game {
     this.props.events.length = 0;
   }
 
+  // ---------------------------------------------------------------- police
+  startChase() {
+    if (this.police) this.police.dispose();
+    this.police = new Police(this, 3);
+    this.chaseEndT = 0;
+    this.hud.message('POLICE CHASE!', 2.5, 'warn');
+    this.hud.sub('Lose them: get 350 m away and stay gone. Stop and you are busted.', 5);
+  }
+
+  endChase() {
+    this.police?.dispose();
+    this.police = null;
+    this.audio.siren(0);
+    this.hud.setChase(null);
+  }
+
+  _copHit(sev, x, z, nx, nz, speed) {
+    if (sev > 1.5) this.damage.impact(x, this.carY + 0.45, z, nx, nz, sev);
+    this.audio.hit(Math.min(1, speed / 14));
+    this.shake = Math.max(this.shake, Math.min(0.9, speed / 12));
+    this.ffbJolt = Math.min(0.9, speed / 9) * (Math.random() < 0.5 ? -1 : 1);
+    if (speed > 3) this.particles.sparks(x, this.carY + 0.4, z, 0, 0, Math.min(20, speed * 2) | 0);
+  }
+
+  _updatePolice(dt) {
+    const P = this.police;
+    P.update(dt);
+    for (const k of P.cops) if (k.damage.events.length) this._damageEvents(k.damage, 0, 0, false);
+    const near = P.nearest();
+    this.audio.siren(P.active ? Math.max(0, 1 - near / 320) : 0);
+    this.hud.setChase(P.active ? { near, escape: P.escapeT / 8, bust: P.bustT / 3, left: P.cops.filter((k) => !k.out).length } : null);
+    if (!P.active && !this.chaseEndT) {
+      this.chaseEndT = this.time;
+      if (P.state === 'escaped') {
+        this.hud.message(P.reason === 'disabled' ? 'COPS WRECKED!' : 'ESCAPED!', 3, 'go');
+        this._pay(2000);
+        this.hud.cash('+$2,000');
+        unlock('getaway', this.career);
+        this.audio.cash();
+      } else {
+        const fine = Math.min(1500, this.career.money);
+        this.career.money -= fine;
+        saveCareer(this.career);
+        this.hud.message('BUSTED!', 3, 'warn');
+        this.hud.sub(`Fined $${fine.toLocaleString('en-US')}`, 3);
+      }
+      this.audio.siren(0);
+    }
+    if (this.chaseEndT && this.time - this.chaseEndT > 5) this.endChase();
+  }
+
   resetProps() {
     this.props?.reset();
+    this.traffic?.reset();
     this.debris.clear();
     this.hud.sub('PROPS RESET', 1.5);
   }
@@ -900,7 +981,13 @@ export class Game {
     if (c.tipped) this._startTumble();
   }
 
+  _crashCam() {
+    if (!this.free || this.settings.crashCam === false || this.slowmoT > 0) return;
+    this.slowmoT = 1.6;
+  }
+
   _startTumble() {
+    if (this.car.speed > 12) this._crashCam();
     const c = this.chassis, car = this.car, cg = this.spec.cgHeight;
     const q = new THREE.Quaternion().setFromEuler(new THREE.Euler(c.pitch, car.psi, c.roll, 'YXZ'));
     const X = new THREE.Vector3(0, cg, 0).applyQuaternion(q).add(new THREE.Vector3(car.x, c.y, car.z));
@@ -981,6 +1068,7 @@ export class Game {
       }
       if (!player) continue;
       if (e.type === 'puncture') { this.hud.sub('PUNCTURE!', 2.5); this.audio.pop(); }
+      if (e.type === 'big') this._crashCam();
       if (e.type === 'overheat') this.hud.sub('ENGINE OVERHEATING', 3);
       if (e.type === 'engine') this.hud.sub('ENGINE DAMAGED', 2.5);
       if (e.type === 'dead') {

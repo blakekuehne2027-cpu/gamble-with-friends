@@ -12,6 +12,7 @@ const STYLES = {
   proto: { len: 4.6, width: 1.95, bottom: 0.2, noseH: 0.44, hoodH: 0.78, cowl: 0.5, roofFront: -0.15, roofBack: -0.8, roofH: 1.1, deckStart: -1.35, deckH: 0.92, tailH: 0.96, wing: 'big', cabinW: 0.66 },
   coupe: { len: 4.2, width: 1.82, bottom: 0.24, noseH: 0.62, hoodH: 0.9, cowl: 0.55, roofFront: -0.1, roofBack: -0.9, roofH: 1.32, deckStart: -1.4, deckH: 0.98, tailH: 0.98, wing: 'none', cabinW: 0.8 },
   hyper: { len: 4.8, width: 2.05, bottom: 0.16, noseH: 0.38, hoodH: 0.72, cowl: 0.45, roofFront: -0.2, roofBack: -0.75, roofH: 1.05, deckStart: -1.25, deckH: 0.88, tailH: 0.92, wing: 'big', cabinW: 0.62 },
+  truck: { len: 5.3, width: 2.02, bottom: 0.44, noseH: 1.02, hoodH: 1.24, cowl: 0.95, roofFront: 0.38, roofBack: -0.9, roofH: 2.0, deckStart: -1.0, deckH: 1.22, tailH: 1.22, wing: 'none', cabinW: 0.9 },
   muscle: { len: 4.75, width: 1.95, bottom: 0.26, noseH: 0.72, hoodH: 0.95, cowl: 0.55, roofFront: -0.05, roofBack: -0.95, roofH: 1.32, deckStart: -1.65, deckH: 1.05, tailH: 1.04, wing: 'duck', cabinW: 0.8 },
 };
 
@@ -355,8 +356,21 @@ export class CarModel {
       part(sx > 0 ? 'mirrorL' : 'mirrorR', mirror, 'panel', 5);
     }
 
+    // Pickup bed: a dark liner on top of the load area, plus a tailgate edge.
+    if (spec.style === 'truck') {
+      const bedLen = st.deckStart - (-st.len / 2) - 0.25;
+      const liner = new THREE.Mesh(new THREE.BoxGeometry(st.width - 0.26, 0.02, bedLen), new THREE.MeshStandardMaterial({ color: 0x1c1c1e, roughness: 0.95 }));
+      liner.position.set(0, st.deckH + 0.012, (st.deckStart - 0.05 + (-st.len / 2 + 0.2)) / 2 + zOff);
+      this.body.add(liner);
+      for (const sx of [1, -1]) {
+        const rail = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.06, bedLen), paint);
+        rail.position.set(sx * (st.width / 2 - 0.09), st.deckH + 0.04, liner.position.z);
+        this.body.add(rail);
+      }
+    }
+
     // Stripes.
-    if (spec.style !== 'muscle') {
+    if (spec.style !== 'muscle' && spec.style !== 'truck') {
       const stripeMat = new THREE.MeshStandardMaterial({ color: 0xf5f5f5, roughness: 0.35, polygonOffset: true, polygonOffsetFactor: -2 });
       const stripe = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.012, roofLen + 0.05), stripeMat);
       stripe.position.set(0.16, st.roofH + 0.06, (st.roofFront + st.roofBack) / 2 + zOff);
@@ -396,20 +410,22 @@ export class CarModel {
       part('spoiler', duck, 'panel', 12);
     }
 
-    // Race numbers on the doors and bonnet.
-    const numMat = new THREE.MeshStandardMaterial({ map: numberTexture(number), transparent: true, roughness: 0.4, polygonOffset: true, polygonOffsetFactor: -4 });
-    for (const sx of [1, -1]) {
+    // Race numbers on the doors and bonnet (road cars have none).
+    const numMat = number === null ? null : new THREE.MeshStandardMaterial({ map: numberTexture(number), transparent: true, roughness: 0.4, polygonOffset: true, polygonOffsetFactor: -4 });
+    for (const sx of numMat ? [1, -1] : []) {
       const plate = new THREE.Mesh(new THREE.CircleGeometry(0.26, 24), numMat);
       plate.position.set(sx * (st.width / 2 + 0.035), (st.bottom + st.hoodH) / 2 + 0.04, zOff - 0.2);
       plate.rotation.y = sx * Math.PI / 2;
       this.body.add(plate);
       this.deformables.push(plate);
     }
-    const bonnet = new THREE.Mesh(new THREE.CircleGeometry(0.24, 24), numMat);
-    bonnet.rotation.x = -Math.PI / 2 + 0.12;
-    bonnet.position.set(0, st.noseH + 0.136, f - 0.75 - hingeZ);
-    bonnet.position.y -= hy1;
-    hood.add(bonnet);
+    if (numMat) {
+      const bonnet = new THREE.Mesh(new THREE.CircleGeometry(0.24, 24), numMat);
+      bonnet.rotation.x = -Math.PI / 2 + 0.12;
+      bonnet.position.set(0, st.noseH + 0.136, f - 0.75 - hingeZ);
+      bonnet.position.y -= hy1;
+      hood.add(bonnet);
+    }
 
     // Driver.
     const driverX = Math.min(0.37, cabW * 0.27);

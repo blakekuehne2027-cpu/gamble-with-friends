@@ -37,6 +37,7 @@ export const ACHIEVEMENTS = [
   { id: 'strike', icon: '🎳', name: 'Strike!', desc: 'Knock down all ten pins in the Proving Grounds.', reward: 1000 },
   { id: 'crash_test', icon: '💥', name: 'Crash Test Dummy', desc: 'Hit something at more than 130 km/h (80 mph).', reward: 1000 },
   { id: 'totaled', icon: '🔥', name: 'Totaled', desc: 'Destroy an engine.', reward: 500 },
+  { id: 'getaway', icon: '🚨', name: 'Getaway Driver', desc: 'Escape a police chase in free roam.', reward: 2000 },
   { id: 'underdog', icon: '👑', name: 'Underdog', desc: 'Beat Viktor "King" Kane and finish the story.', reward: 25000 },
 ];
 const BY_ID = Object.fromEntries(ACHIEVEMENTS.map((a) => [a.id, a]));

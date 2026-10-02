@@ -165,10 +165,10 @@ class Prop {
 }
 
 // A parked car that can be shunted around (and dented).
-class ParkedCar {
+export class ParkedCar {
   constructor(scene, carId, color, x, z, heading, damageMode) {
     this.spec = findCar(carId);
-    this.model = new CarModel(this.spec, color, { number: 0 });
+    this.model = new CarModel(this.spec, color, { number: null });
     scene.add(this.model.root);
     this.damage = new CarDamage(this.model, this.spec, damageMode === 'off' ? 'off' : 'visual');
     this.home = { x, z, heading };
@@ -211,6 +211,43 @@ class ParkedCar {
     m.root.position.set(this.x, ground(this.x, this.z, Infinity), this.z);
     m.root.rotation.set(0, this.psi, 0);
     m.update(dt, { lights: false });
+  }
+}
+
+// The player's car against parked/traffic cars (two circles per car, like the
+// race cars). onHit(sev, x, z, nx, nz, 'car', speed, otherCar).
+export function collideParked(car, carY, cars, onHit) {
+  const sp = Math.sin(car.psi), cp = Math.cos(car.psi);
+  const R = 1.05;
+  for (const pc of cars) {
+    const dx0 = pc.x - car.x, dz0 = pc.z - car.z;
+    if (dx0 * dx0 + dz0 * dz0 > 49) continue;
+    if (carY > pc.model.root.position.y + 1.25) continue; // flying over it
+    let best = null;
+    for (const po of [1.15, -1.15]) {
+      const px = car.x + sp * po, pz = car.z + cp * po;
+      for (const ao of [1.15, -1.15]) {
+        const ax = pc.x + Math.sin(pc.psi) * ao, az = pc.z + Math.cos(pc.psi) * ao;
+        const ddx = px - ax, ddz = pz - az, d = Math.hypot(ddx, ddz);
+        const pen = 2 * R - d;
+        if (pen > 0 && (!best || pen > best.pen)) best = { pen, nx: ddx / (d || 1), nz: ddz / (d || 1), px, pz };
+      }
+    }
+    if (!best) continue;
+    const { pen, nx, nz } = best;
+    const wx = best.px - nx * R, wz = best.pz - nz * R;
+    car.x += nx * pen * 0.5; car.z += nz * pen * 0.5;
+    pc.x -= nx * pen * 0.5; pc.z -= nz * pen * 0.5;
+    const va = car.velocityAt(wx, wz), vb = pc.velocityAt(wx, wz);
+    const vn = (va.x - vb.x) * nx + (va.z - vb.z) * nz;
+    if (vn >= 0) continue;
+    const J = (-(1.25) * vn) / (1 / car.spec.mass + 1 / pc.mass);
+    car.applyImpulse(nx * J, nz * J, wx, wz);
+    pc.applyImpulse(-nx * J, -nz * J, wx, wz);
+    pc.hit?.(-vn);
+    pc.model.root.updateMatrixWorld(true);
+    pc.damage.impact(wx, carY + 0.45, wz, -nx, -nz, -vn);
+    onHit(-vn, wx, wz, nx, nz, 'car', -vn, pc);
   }
 }
 
@@ -297,37 +334,7 @@ export class Props {
       car.applyImpulse(-nx * J, -nz * J, wx, wz);
       onHit(-vn * Math.min(1, p.mass / 600), wx, wz, -nx, -nz, p.t.sound, -vn);
     }
-    // Parked cars: two circles each, like the race cars.
-    const R = 1.05;
-    for (const pc of this.cars) {
-      const dx0 = pc.x - car.x, dz0 = pc.z - car.z;
-      if (dx0 * dx0 + dz0 * dz0 > 49) continue;
-      if (carY > pc.model.root.position.y + 1.25) continue; // flying over it
-      let best = null;
-      for (const po of [1.15, -1.15]) {
-        const px = car.x + sp * po, pz = car.z + cp * po;
-        for (const ao of [1.15, -1.15]) {
-          const ax = pc.x + Math.sin(pc.psi) * ao, az = pc.z + Math.cos(pc.psi) * ao;
-          const ddx = px - ax, ddz = pz - az, d = Math.hypot(ddx, ddz);
-          const pen = 2 * R - d;
-          if (pen > 0 && (!best || pen > best.pen)) best = { pen, nx: ddx / (d || 1), nz: ddz / (d || 1), px, pz };
-        }
-      }
-      if (!best) continue;
-      const { pen, nx, nz } = best;
-      const wx = best.px - nx * R, wz = best.pz - nz * R;
-      car.x += nx * pen * 0.5; car.z += nz * pen * 0.5;
-      pc.x -= nx * pen * 0.5; pc.z -= nz * pen * 0.5;
-      const va = car.velocityAt(wx, wz), vb = pc.velocityAt(wx, wz);
-      const vn = (va.x - vb.x) * nx + (va.z - vb.z) * nz;
-      if (vn >= 0) continue;
-      const J = (-(1.25) * vn) / (1 / car.spec.mass + 1 / pc.mass);
-      car.applyImpulse(nx * J, nz * J, wx, wz);
-      pc.applyImpulse(-nx * J, -nz * J, wx, wz);
-      pc.model.root.updateMatrixWorld(true);
-      pc.damage.impact(wx, carY + 0.45, wz, -nx, -nz, -vn);
-      onHit(-vn, wx, wz, nx, nz, 'car', -vn, pc);
-    }
+    collideParked(car, carY, this.cars, onHit);
     for (const pc of this.cars) pc.update(dt, this.ground);
     // Physics (two substeps) and pin-on-pin knocks.
     const h = dt / 2;
