@@ -78,7 +78,8 @@ Between events, earn money with **Jobs** and in the **Drag Race** betting lanes.
 - **Transmission**: *H-Shifter* (default when a shifter is set up), *Sequential* (paddles) or *Automatic*. Change it in Race setup or Settings.
 - **Auto clutch** is on by default, so you can shift without the clutch pedal. Turn it off in Settings for the full manual experience.
 - **Steering ratio** (Settings): lower = quicker steering. *Wheel rotation* must match what G HUB is set to (900° by default).
-- Assists: ABS, traction control (on by default) and stability assist (for keyboard players).
+- **Brakes**: *Brake pedal feel* sets how gently the brakes come in at light pressure (Sharp, Firm, Medium or Soft; Medium is the default). *Brake strength* sets the force at a fully pressed pedal (85% by default). Grabby brakes? Pick *Soft* or lower the strength. Have to stomp the G29's stiff brake pedal? Pick *Firm* or raise the strength.
+- Assists: ABS with braking stability (keeps the car straight when you brake hard, even mid-corner), traction control (both on by default) and stability assist (for keyboard players). With ABS off the fronts can lock and the car can spin under braking, like an old race car.
 
 ## Controls
 

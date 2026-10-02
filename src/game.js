@@ -311,6 +311,8 @@ export class Game {
     if (mode === 'auto' && car.gear === -1) [throttle, brake] = [brake, throttle];
     // The car is held on the brakes until the lights go out (you can still rev it).
     const physBrake = this.state === 'countdown' ? 1 : brake;
+    // Brake pedal feel: a curve so light pressure brakes gently, and an overall strength.
+    const brakePressure = Math.pow(Math.max(0, Math.min(1, physBrake)), S.brakeCurve ?? 1.8) * (S.brakeStrength ?? 0.85);
     if (this.state === 'finished' && this.finishedAt !== undefined && this.time - this.finishedAt > 1.5) {
       throttle = Math.min(throttle, 0.25);
     }
@@ -339,7 +341,7 @@ export class Game {
 
     // Surfaces under the four wheels.
     const env = this._surface();
-    const phys = { throttle, brake: physBrake, clutch: inp.clutch, steer, handbrake: inp.handbrake, nitro: this.nitroOn, autoClutch, abs: S.abs, tc: S.tc, stability: S.stability };
+    const phys = { throttle, brake: physBrake, brakePressure, clutch: inp.clutch, steer, handbrake: inp.handbrake, nitro: this.nitroOn, autoClutch, abs: S.abs, tc: S.tc, stability: S.stability };
     this.acc = (this.acc || 0) + dt;
     let n = 0;
     while (this.acc >= STEP && n < 20) {
@@ -352,7 +354,7 @@ export class Game {
       this.hud.message('STALLED', 1.6, 'warn');
       this.hud.sub('Press the clutch to restart', 2.5);
     }
-    this.absActive = S.abs && brake > 0.3 && Math.abs(car.u) > 3 && brake * spec.brakeForce * spec.brakeBias > spec.mu * env.mu * car.Nf * 0.97;
+    this.absActive = S.abs && brake > 0.3 && Math.abs(car.u) > 3 && brakePressure * spec.brakeForce * spec.brakeBias > spec.mu * env.mu * car.Nf * 0.93;
     this.tcActive = S.tc && car.tcCut < 0.9;
 
     this._collideWalls();

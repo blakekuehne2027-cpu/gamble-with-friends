@@ -207,7 +207,7 @@ export class CarPhysics {
   }
 
   // ---- One physics sub-step ----
-  // inp: { throttle, brake, clutch, steer (-1..1, + = right), handbrake, nitro, autoClutch, abs, tc, stability }
+  // inp: { throttle, brake, brakePressure?, clutch, steer (-1..1, + = right), handbrake, nitro, autoClutch, abs, tc, stability }
   // env: { mu, drag, slope (dh per metre forward) }
   step(h, inp, env) {
     const s = this.spec;
@@ -331,16 +331,37 @@ export class CarPhysics {
     }
 
     // --- Brakes ---
-    const brake = clamp(inp.brake, 0, 1);
+    // brakePressure = pedal after the player's feel/strength settings.
+    const brake = clamp(inp.brakePressure ?? inp.brake, 0, 1);
     const Fb = brake * s.brakeForce;
     let FbF = Fb * s.brakeBias, FbR = Fb * (1 - s.brakeBias);
     this.frontLock = false; this.rearLock = false;
+    // Brake proportioning (like a real car's EBD / proportioning valve): weight
+    // moves forward under braking, so the rear brakes are held well below what
+    // the lightly loaded rear tyres can take. That keeps sideways grip at the
+    // back and stops the car swapping ends when you brake hard.
+    FbR = Math.min(FbR, muR * Nr * 0.6);
+    // Braking stability (part of ABS, like ESC on a road car): if the car
+    // starts to rotate more than the steering asks for while braking, ease
+    // off the rear brakes and pull the nose back in line (see Mz below).
+    this.escErr = 0;
+    if (inp.abs && Fb > 0 && absU > 4) {
+      const rDes = (u * delta) / (this.L * (1 + (u * u) / 900));
+      const rMax = (s.mu * env.mu * G * 1.05) / absU;
+      const target = clamp(rDes, -rMax, rMax);
+      const over = (r - target) * Math.sign(r || 1);
+      const slideR = Math.abs(this.alphaR) - Math.abs(this.alphaF);
+      if (over > 0.03 || slideR > 0.02) {
+        this.escErr = clamp(r - target, -1.5, 1.5);
+        FbR *= clamp(1 - Math.max(over * 6, slideR * 20), 0.15, 1);
+      }
+    }
     if (inp.abs) {
-      FbF = Math.min(FbF, muF * Nf * 0.97);
-      FbR = Math.min(FbR, muR * Nr * 0.97);
-    } else {
-      if (FbF > muF * Nf && absU > 1) { FbF = muF * Nf * 0.88; this.frontLock = true; }
-      if (FbR > muR * Nr && absU > 1) { FbR = muR * Nr * 0.88; this.rearLock = true; }
+      // ABS holds the fronts just under the limit so you can still steer.
+      FbF = Math.min(FbF, muF * Nf * 0.93);
+    } else if (FbF > muF * Nf && absU > 1) {
+      FbF = muF * Nf * 0.88;
+      this.frontLock = true;
     }
     if (inp.handbrake && absU > 0.5) { FbR = Math.max(FbR, muR * Nr * 0.85); this.rearLock = true; }
 
@@ -382,6 +403,12 @@ export class CarPhysics {
 
     // --- Stability assist (keyboard friendly) ---
     let Mz = s.a * FyF - s.b * FyR;
+    if (this.escErr) {
+      // Brake the outside front wheel: a yaw moment against the rotation,
+      // limited to what the front tyre could really give.
+      const MzMax = muF * Nf * 0.75;
+      Mz -= clamp(this.escErr * s.inertia * 4, -MzMax, MzMax);
+    }
     this.stabilityCut = 1;
     if (inp.stability && absU > 3) {
       const rDes = (u * delta) / (this.L * (1 + (u * u) / 900));

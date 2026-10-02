@@ -8,6 +8,8 @@ export const DEFAULTS = {
   abs: true,
   tc: true,
   stability: false,
+  brakeCurve: 1.8, // pedal-to-brake curve: 1 = linear, higher = gentler at light pressure
+  brakeStrength: 0.85, // brake force at a fully pressed pedal
   wheelRange: 900, // what the wheel is set to in G HUB / driver
   steerRatio: 12, // degrees of wheel rotation per degree of road-wheel angle
   ffb: true,

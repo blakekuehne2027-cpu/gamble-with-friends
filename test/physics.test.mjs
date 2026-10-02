@@ -133,5 +133,22 @@ for (const spec of CARS) {
 }
 console.log('traction control: no spins mid-corner');
 
+// Braking stability (ABS on): hard braking in a fast bend or while turning
+// into a corner at the grip limit must not swap the car's ends.
+for (const spec of CARS) {
+  for (const [label, v0, steer, pedal] of [['fast bend', 160, 0.02, 1], ['corner entry', 110, 0.1, 0.6], ['corner entry', 110, 0.1, 1]]) {
+    const car = new CarPhysics(spec);
+    car.u = v0 / 3.6; car.gear = 3; car.omegaE = car.totalRatio() * car.u;
+    let maxBeta = 0;
+    run(car, 6, (t, c) => {
+      const brake = t > 2.5 ? pedal : 0;
+      if (brake && Math.abs(c.u) > 3) maxBeta = Math.max(maxBeta, Math.abs(Math.atan2(c.v, Math.abs(c.u))));
+      return { throttle: brake ? 0 : 0.35, brake, steer };
+    });
+    check(maxBeta < 0.35, `${spec.name} spun braking (${label}, ${pedal * 100}% pedal): slip ${(maxBeta * 57.3).toFixed(0)} deg`);
+  }
+}
+console.log('braking stability: no spins under braking');
+
 if (failed) { console.error(`${failed} physics check(s) failed`); process.exit(1); }
 console.log('physics tests passed');

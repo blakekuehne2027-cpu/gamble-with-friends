@@ -23,6 +23,8 @@ import {
 const hexCss = (h) => '#' + h.toString(16).padStart(6, '0');
 const DIFF = ['Easy', 'Medium', 'Hard', 'Pro'];
 
+const BRAKE_FEEL = { 1: 'Sharp (linear)', 1.4: 'Firm', 1.8: 'Medium', 2.3: 'Soft' };
+
 export class UI {
   constructor({ input, audio, ffb, settings, game, showroom, career, mods, radio }) {
     this.radio = radio;
@@ -298,7 +300,9 @@ export class UI {
           <h4>Driving</h4>
           ${this._optRow('transmission', 'Transmission', transName(S.transmission))}
           ${this._optRow('autoClutch', 'Auto clutch (no stalling)', onoff(S.autoClutch))}
-          ${this._optRow('abs', 'ABS', onoff(S.abs))}
+          ${this._optRow('abs', 'ABS + braking stability', onoff(S.abs))}
+          ${this._optRow('brakeCurve', 'Brake pedal feel', BRAKE_FEEL[S.brakeCurve] || 'Medium')}
+          ${this._optRow('brakeStrength', 'Brake strength', pct(S.brakeStrength))}
           ${this._optRow('tc', 'Traction control', onoff(S.tc))}
           ${this._optRow('stability', 'Stability assist', onoff(S.stability))}
           <h4>Wheel</h4>
@@ -657,6 +661,8 @@ export class UI {
       case 'transmission': S.transmission = cyc(['h', 'seq', 'auto'], S.transmission); break;
       case 'timeOfDay': S.timeOfDay = cyc(['default', 'day', 'sunset', 'night'], S.timeOfDay); break;
       case 'weather': S.weather = S.weather === 'rain' ? 'dry' : 'rain'; break;
+      case 'brakeCurve': S.brakeCurve = cyc([1, 1.4, 1.8, 2.3], S.brakeCurve); break;
+      case 'brakeStrength': S.brakeStrength = +step(S.brakeStrength, 0.5, 1, 0.05).toFixed(2); break;
       case 'wheelRange': S.wheelRange = step(S.wheelRange, 180, 1080, 30); break;
       case 'steerRatio': S.steerRatio = step(S.steerRatio, 6, 20, 1); break;
       case 'ffbStrength': S.ffbStrength = +step(S.ffbStrength, 0, 1, 0.05).toFixed(2); break;
